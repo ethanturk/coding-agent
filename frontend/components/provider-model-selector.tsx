@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 const providers = ['openai', 'openai_compatible', 'z_ai_coding'];
 
@@ -24,6 +24,15 @@ export function ProviderModelSelector({
     if (!provider) return [];
     return providersConfig?.[provider]?.models || [];
   }, [provider, providersConfig]);
+
+  useEffect(() => {
+    if (!models.length) {
+      setModel('');
+      return;
+    }
+    if (model && models.includes(model)) return;
+    setModel('');
+  }, [provider, models, model]);
 
   return (
     <div className="grid" style={{ gap: 8 }}>
