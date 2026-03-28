@@ -1,0 +1,14 @@
+[Unit]
+Description=Agent Platform MVP Backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ethanturk/.openclaw/workspace/agent-platform-mvp/backend
+EnvironmentFile=/home/ethanturk/.openclaw/workspace/agent-platform-mvp/backend/.env
+ExecStart=/usr/bin/uv run uvicorn app.main:app --host 0.0.0.0 --port 8010
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

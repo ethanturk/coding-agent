@@ -1,0 +1,14 @@
+[Unit]
+Description=Agent Platform MVP Frontend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ethanturk/.openclaw/workspace/agent-platform-mvp/frontend
+EnvironmentFile=/home/ethanturk/.openclaw/workspace/agent-platform-mvp/frontend/.env.local
+ExecStart=/usr/bin/npx next dev --hostname 0.0.0.0 --port 3010
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
