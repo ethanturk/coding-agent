@@ -10,12 +10,14 @@ export function ProviderModelSelector({
   value,
   providersConfig,
   allowBlankProvider = true,
+  onChange,
 }: {
-  providerName: string;
-  modelName: string;
+  providerName?: string;
+  modelName?: string;
   value?: { provider?: string; model?: string };
   providersConfig: any;
   allowBlankProvider?: boolean;
+  onChange?: (value: { provider: string; model: string }) => void;
 }) {
   const [provider, setProvider] = useState(value?.provider || (allowBlankProvider ? '' : 'openai'));
   const [model, setModel] = useState(value?.model || '');
@@ -33,6 +35,11 @@ export function ProviderModelSelector({
     if (model && models.includes(model)) return;
     setModel('');
   }, [provider, models, model]);
+
+  useEffect(() => {
+    onChange?.({ provider, model });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, model]);
 
   return (
     <div className="grid" style={{ gap: 8 }}>

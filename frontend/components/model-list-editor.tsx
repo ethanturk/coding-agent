@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-export function ModelListEditor({ name, initial }: { name: string; initial?: string[] }) {
+export function ModelListEditor({ name, initial, onChange }: { name?: string; initial?: string[]; onChange?: (items: string[]) => void }) {
   const [items, setItems] = useState<string[]>(initial || []);
   const [value, setValue] = useState('');
 
@@ -16,6 +16,11 @@ export function ModelListEditor({ name, initial }: { name: string; initial?: str
   function removeItem(item: string) {
     setItems(items.filter((x) => x !== item));
   }
+
+  useEffect(() => {
+    onChange?.(items);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   return (
     <div className="grid" style={{ gap: 8 }}>
@@ -31,7 +36,7 @@ export function ModelListEditor({ name, initial }: { name: string; initial?: str
           </span>
         ))}
       </div>
-      <input type="hidden" name={name} value={JSON.stringify(items)} />
+      {name ? <input type="hidden" name={name} value={JSON.stringify(items)} /> : null}
     </div>
   );
 }
