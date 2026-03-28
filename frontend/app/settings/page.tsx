@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { ModelListEditor } from '../../components/model-list-editor';
 
 async function saveSettings(formData: FormData) {
   'use server';
@@ -10,16 +11,17 @@ async function saveSettings(formData: FormData) {
         base_url: formData.get('openai_base_url') || '',
         organization: formData.get('openai_organization') || '',
         project: formData.get('openai_project') || '',
+        models: JSON.parse(String(formData.get('openai_models') || '[]')),
       },
       openai_compatible: {
         api_key: formData.get('compatible_api_key') || '',
         base_url: formData.get('compatible_base_url') || '',
-        model: formData.get('compatible_model') || '',
+        models: JSON.parse(String(formData.get('compatible_models') || '[]')),
       },
       z_ai_coding: {
         api_key: formData.get('zai_api_key') || '',
         base_url: formData.get('zai_base_url') || '',
-        model: formData.get('zai_model') || '',
+        models: JSON.parse(String(formData.get('zai_models') || '[]')),
       },
     },
     default: {
@@ -59,6 +61,10 @@ function ProviderSelect({ name, value }: { name: string; value?: string }) {
   );
 }
 
+function ModelInput({ name, value, placeholder }: { name: string; value?: string; placeholder: string }) {
+  return <input name={name} placeholder={placeholder} defaultValue={value || ''} />;
+}
+
 export default async function SettingsPage() {
   const settings = await getSettings();
   return (
@@ -77,16 +83,17 @@ export default async function SettingsPage() {
           <input name="openai_base_url" placeholder="https://api.openai.com/v1" defaultValue={settings?.providers?.openai?.base_url || ''} />
           <input name="openai_organization" placeholder="Organization (optional)" defaultValue={settings?.providers?.openai?.organization || ''} />
           <input name="openai_project" placeholder="Project (optional)" defaultValue={settings?.providers?.openai?.project || ''} />
+          <ModelListEditor name="openai_models" initial={settings?.providers?.openai?.models || []} />
 
           <h2 className="section-title">OpenAI Compatible</h2>
           <input name="compatible_api_key" placeholder="Compatible API key" defaultValue={settings?.providers?.openai_compatible?.api_key || ''} />
           <input name="compatible_base_url" placeholder="https://provider.example/v1" defaultValue={settings?.providers?.openai_compatible?.base_url || ''} />
-          <input name="compatible_model" placeholder="model name" defaultValue={settings?.providers?.openai_compatible?.model || ''} />
+          <ModelListEditor name="compatible_models" initial={settings?.providers?.openai_compatible?.models || []} />
 
           <h2 className="section-title">Z.AI Coding</h2>
           <input name="zai_api_key" placeholder="Z.AI API key" defaultValue={settings?.providers?.z_ai_coding?.api_key || ''} />
           <input name="zai_base_url" placeholder="https://api.z.ai/api/coding/paas/v4" defaultValue={settings?.providers?.z_ai_coding?.base_url || ''} />
-          <input name="zai_model" placeholder="glm-5" defaultValue={settings?.providers?.z_ai_coding?.model || ''} />
+          <ModelListEditor name="zai_models" initial={settings?.providers?.z_ai_coding?.models || []} />
 
           <h2 className="section-title">Per-Role Overrides</h2>
           {['orchestrator','planner','developer','tester','reviewer','reporter'].map((role) => (
