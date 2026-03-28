@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { ModelListEditor } from '../../components/model-list-editor';
+import { ProviderModelSelector } from '../../components/provider-model-selector';
 
 async function saveSettings(formData: FormData) {
   'use server';
@@ -50,20 +51,6 @@ async function getSettings() {
   return res.ok ? res.json() : null;
 }
 
-const providers = ['openai', 'openai_compatible', 'z_ai_coding'];
-
-function ProviderSelect({ name, value }: { name: string; value?: string }) {
-  return (
-    <select name={name} defaultValue={value || ''}>
-      <option value="">Use default</option>
-      {providers.map((p) => <option key={p} value={p}>{p}</option>)}
-    </select>
-  );
-}
-
-function ModelInput({ name, value, placeholder }: { name: string; value?: string; placeholder: string }) {
-  return <input name={name} placeholder={placeholder} defaultValue={value || ''} />;
-}
 
 export default async function SettingsPage() {
   const settings = await getSettings();
@@ -74,8 +61,7 @@ export default async function SettingsPage() {
         <p className="page-subtitle">Global provider config and per-role model overrides.</p>
         <form action={saveSettings} className="grid">
           <h2 className="section-title">Default Model</h2>
-          <ProviderSelect name="default_provider" value={settings?.default?.provider} />
-          <input name="default_model" placeholder="Default model name" defaultValue={settings?.default?.model || ''} />
+          <ProviderModelSelector providerName="default_provider" modelName="default_model" value={settings?.default} providersConfig={settings?.providers} allowBlankProvider={false} />
           <input name="max_prompt_length" type="number" placeholder="1000" defaultValue={settings?.prompting?.max_prompt_length || 1000} />
 
           <h2 className="section-title">OpenAI</h2>
@@ -99,8 +85,7 @@ export default async function SettingsPage() {
           {['orchestrator','planner','developer','tester','reviewer','reporter'].map((role) => (
             <div key={role} className="card">
               <div style={{ marginBottom: 8, fontWeight: 700, textTransform: 'capitalize' }}>{role}</div>
-              <ProviderSelect name={`${role}_provider`} value={settings?.roles?.[role]?.provider} />
-              <input name={`${role}_model`} placeholder="Override model (optional)" defaultValue={settings?.roles?.[role]?.model || ''} />
+              <ProviderModelSelector providerName={`${role}_provider`} modelName={`${role}_model`} value={settings?.roles?.[role]} providersConfig={settings?.providers} />
             </div>
           ))}
 
