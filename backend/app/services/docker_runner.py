@@ -19,6 +19,16 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=True)
 
 
+def get_github_token() -> str | None:
+    token = os.environ.get('GITHUB_TOKEN')
+    if token:
+        return token
+    gh = subprocess.run(['gh', 'auth', 'token'], capture_output=True, text=True)
+    if gh.returncode == 0 and gh.stdout.strip():
+        return gh.stdout.strip()
+    return None
+
+
 def ensure_docker_environment(db: Session, run: Run, project: Project) -> ExecutionEnvironment:
     existing = db.query(ExecutionEnvironment).filter(ExecutionEnvironment.run_id == run.id).first()
     if existing:
@@ -51,7 +61,7 @@ def create_container(db: Session, env: ExecutionEnvironment) -> ExecutionEnviron
         'docker', 'run', '-d', '--rm', '--name', name,
         '-w', '/workspace',
     ]
-    github_token = os.environ.get('GITHUB_TOKEN')
+    github_token = get_github_token()
     if github_token:
         command.extend(['-e', f'GITHUB_TOKEN={github_token}'])
     command.extend([
@@ -67,7 +77,8 @@ def create_container(db: Session, env: ExecutionEnvironment) -> ExecutionEnviron
 
 
 def _sanitize(command: str) -> str:
-    return command.replace(os.environ.get('GITHUB_TOKEN', ''), '***') if os.environ.get('GITHUB_TOKEN') else command
+    token = get_github_token()
+    return command.replace(token, '***') if token else command
 
 
 def exec_in_container(env: ExecutionEnvironment, command: str) -> dict:

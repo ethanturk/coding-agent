@@ -32,13 +32,28 @@ def get_run_route(run_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{run_id}/execute", response_model=RunRead)
 def execute_run_route(run_id: str, db: Session = Depends(get_db)):
-    try:
-        run = execute_run(db, run_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    run = get_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return run
+    try:
+        updated = execute_run(db, run_id)
+    except ValueError as e:
+        run.status = RunStatus.FAILED
+        run.final_summary = str(e)
+        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.failed', payload_json={'error': str(e)}))
+        db.commit()
+        db.refresh(run)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        run.status = RunStatus.FAILED
+        run.final_summary = str(e)
+        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.failed', payload_json={'error': str(e)}))
+        db.commit()
+        db.refresh(run)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    if not updated:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return updated
 
 
 @router.post("/{run_id}/retry", response_model=RunRead)
@@ -55,7 +70,19 @@ def retry_run_route(run_id: str, db: Session = Depends(get_db)):
     try:
         return execute_run(db, run_id)
     except ValueError as e:
+        run.status = RunStatus.FAILED
+        run.final_summary = str(e)
+        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.failed', payload_json={'error': str(e)}))
+        db.commit()
+        db.refresh(run)
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        run.status = RunStatus.FAILED
+        run.final_summary = str(e)
+        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.failed', payload_json={'error': str(e)}))
+        db.commit()
+        db.refresh(run)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/{run_id}/cancel", response_model=RunRead)
