@@ -15,6 +15,7 @@ frontend/.env.local
 # Runtime data
 runtime_artifacts/
 runtime_worktrees/
+runtime_containers/
 
 # Logs / misc
 *.log

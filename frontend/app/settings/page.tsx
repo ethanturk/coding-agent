@@ -24,7 +24,10 @@ async function saveSettings(formData: FormData) {
     },
     default: {
       provider: formData.get('default_provider') || 'openai',
-      model: formData.get('default_model') || 'gpt-4.1-mini',
+      model: formData.get('default_model') || '',
+    },
+    prompting: {
+      max_prompt_length: Number(formData.get('max_prompt_length') || 1000),
     },
     roles: {
       orchestrator: { provider: formData.get('orchestrator_provider') || '', model: formData.get('orchestrator_model') || '' },
@@ -66,7 +69,8 @@ export default async function SettingsPage() {
         <form action={saveSettings} className="grid">
           <h2 className="section-title">Default Model</h2>
           <ProviderSelect name="default_provider" value={settings?.default?.provider} />
-          <input name="default_model" placeholder="gpt-4.1-mini" defaultValue={settings?.default?.model || ''} />
+          <input name="default_model" placeholder="Default model name" defaultValue={settings?.default?.model || ''} />
+          <input name="max_prompt_length" type="number" placeholder="1000" defaultValue={settings?.prompting?.max_prompt_length || 1000} />
 
           <h2 className="section-title">OpenAI</h2>
           <input name="openai_api_key" placeholder="OpenAI API key" defaultValue={settings?.providers?.openai?.api_key || ''} />

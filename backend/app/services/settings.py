@@ -7,6 +7,7 @@ DEFAULT_SETTINGS = {
         'z_ai_coding': {'api_key': '', 'base_url': '', 'model': ''},
     },
     'default': {'provider': 'openai', 'model': ''},
+    'prompting': {'max_prompt_length': 1000},
     'roles': {
         'orchestrator': {},
         'planner': {},

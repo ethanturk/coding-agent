@@ -9,6 +9,7 @@ from app.api.events import router as events_router
 from app.api.files import router as files_router
 from app.api.patches import router as patches_router
 from app.api.projects import router as projects_router
+from app.api.prompting import router as prompting_router
 from app.api.proposals import router as proposals_router
 from app.api.pull_requests import router as pull_requests_router
 from app.api.repo import router as repo_router
@@ -32,6 +33,7 @@ app.include_router(edits_router, prefix="/api")
 app.include_router(proposals_router, prefix="/api")
 app.include_router(pull_requests_router, prefix="/api")
 app.include_router(patches_router, prefix="/api")
+app.include_router(prompting_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(artifacts_router, prefix="/api")

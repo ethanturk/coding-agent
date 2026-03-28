@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { EnhancePromptButton } from '../../../components/enhance-prompt-button';
 
 async function createRun(formData: FormData) {
   'use server';
@@ -53,8 +54,11 @@ export default async function NewRunPage() {
             ))}
           </select>
           <input name="title" placeholder="Run title" required />
-          <textarea name="goal" placeholder="What should the agent do?" rows={6} required />
-          <button type="submit">Create and execute run</button>
+          <textarea id="run-goal" name="goal" placeholder="What should the agent do?" rows={6} required />
+          <div style={{ display: 'flex', gap: 12 }}>
+            <EnhancePromptButton textareaId="run-goal" />
+            <button type="submit">Create and execute run</button>
+          </div>
         </form>
       </section>
     </main>
