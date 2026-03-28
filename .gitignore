@@ -12,6 +12,10 @@ frontend/.next/
 backend/.env
 frontend/.env.local
 
+# Runtime data
+runtime_artifacts/
+runtime_worktrees/
+
 # Logs / misc
 *.log
 .DS_Store
