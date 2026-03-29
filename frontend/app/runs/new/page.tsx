@@ -24,12 +24,12 @@ async function createRun(formData: FormData) {
 
   const run = await runRes.json();
 
-  const executeRes = await fetch(`${base}/api/runs/${run.id}/execute`, { method: 'POST' });
-  if (!executeRes.ok) {
-    const text = await executeRes.text();
-    const message = encodeURIComponent(`Execution failed to start cleanly: ${text}`);
-    redirect(`/runs/${run.id}?launchError=${message}`);
-  }
+  fetch(`${base}/api/runs/${run.id}/execute`, {
+    method: 'POST',
+    cache: 'no-store',
+  }).catch(() => {
+    // Run detail page will reflect any backend failure via run status/events.
+  });
 
   redirect(`/runs/${run.id}`);
 }

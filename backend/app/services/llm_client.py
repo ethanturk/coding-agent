@@ -202,7 +202,7 @@ def llm_chat_text(
     messages: list[dict],
     temperature: float = 0.2,
     max_tokens: int | None = None,
-    timeout: int = 60,
+    timeout: int = 600,
 ) -> dict:
     settings = get_settings(db).value_json
     config = resolve_role_llm_config(settings, role)
@@ -232,7 +232,7 @@ def llm_chat_json(
     temperature: float = 0.1,
     schema_hint: dict | None = None,
     strict_json: bool = False,
-    timeout: int = 60,
+    timeout: int = 600,
 ) -> dict:
     settings = get_settings(db).value_json
     config = resolve_role_llm_config(settings, role)
