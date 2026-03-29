@@ -25,7 +25,7 @@ from app.services.settings import get_settings, resolve_role_model
 
 
 def _write_artifact_file(run_id: str, name: str, content: str) -> str:
-    base = Path('/home/ethanturk/.openclaw/workspace/agent-platform-mvp/runtime_artifacts') / run_id
+    base = Path('/home/ethanturk/.openclaw/workspace/coding-agent/runtime_artifacts') / run_id
     base.mkdir(parents=True, exist_ok=True)
     path = base / name
     path.write_text(content)
@@ -42,9 +42,17 @@ def execute_run(db: Session, run_id: str) -> Run | None:
 
     settings = get_settings(db).value_json
     role_models = {role: resolve_role_model(settings, role) for role in ['orchestrator', 'planner', 'developer', 'tester', 'reviewer', 'reporter']}
+    llm_transport = {
+        'orchestrator': 'litellm',
+        'planner': 'litellm',
+        'developer': 'legacy_http',
+        'tester': 'litellm',
+        'reviewer': 'legacy_http',
+        'reporter': 'litellm',
+    }
 
     run.status = RunStatus.RUNNING
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.started', payload_json={'goal': run.goal, 'role_models': role_models}))
+    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.started', payload_json={'goal': run.goal, 'role_models': role_models, 'llm_transport': llm_transport}))
     db.commit()
 
     instructions = parse_goal_instructions(run.goal)

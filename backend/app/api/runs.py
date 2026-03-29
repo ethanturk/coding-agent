@@ -25,6 +25,31 @@ def _serialize_run_list_item(db: Session, run):
     return data
 
 
+def _record_run_failure(db: Session, run, error: Exception | str):
+    message = str(error)
+    run.status = RunStatus.FAILED
+    run.final_summary = message
+    payload = {
+        'error': message,
+        'error_type': error.__class__.__name__ if isinstance(error, Exception) else 'Error',
+    }
+    for attr in ('provider', 'model', 'role', 'mode', 'api_base', 'status_code'):
+        value = getattr(error, attr, None)
+        if value is not None:
+            payload[attr] = value
+    db.add(
+        Event(
+            id=_id('evt'),
+            run_id=run.id,
+            step_id=run.current_step_id,
+            event_type='run.failed',
+            payload_json=payload,
+        )
+    )
+    db.commit()
+    db.refresh(run)
+
+
 @router.post("", response_model=RunRead)
 def create_run_route(payload: RunCreate, db: Session = Depends(get_db)):
     run = create_run(db, payload)
@@ -53,18 +78,10 @@ def execute_run_route(run_id: str, db: Session = Depends(get_db)):
     try:
         updated = execute_run(db, run_id)
     except ValueError as e:
-        run.status = RunStatus.FAILED
-        run.final_summary = str(e)
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.failed', payload_json={'error': str(e)}))
-        db.commit()
-        db.refresh(run)
+        _record_run_failure(db, run, e)
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        run.status = RunStatus.FAILED
-        run.final_summary = str(e)
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.failed', payload_json={'error': str(e)}))
-        db.commit()
-        db.refresh(run)
+        _record_run_failure(db, run, e)
         raise HTTPException(status_code=500, detail=str(e)) from e
     if not updated:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -85,18 +102,10 @@ def retry_run_route(run_id: str, db: Session = Depends(get_db)):
     try:
         return _serialize_run(db, execute_run(db, run_id))
     except ValueError as e:
-        run.status = RunStatus.FAILED
-        run.final_summary = str(e)
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.failed', payload_json={'error': str(e)}))
-        db.commit()
-        db.refresh(run)
+        _record_run_failure(db, run, e)
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        run.status = RunStatus.FAILED
-        run.final_summary = str(e)
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.failed', payload_json={'error': str(e)}))
-        db.commit()
-        db.refresh(run)
+        _record_run_failure(db, run, e)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
