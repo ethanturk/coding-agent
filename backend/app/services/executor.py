@@ -4,7 +4,7 @@ import json
 from sqlalchemy.orm import Session
 
 from app.models import Approval, Artifact, Event, Project, Run, Step
-from app.models.enums import AgentRole, ApprovalStatus, ArtifactType, RunStatus, StepKind, StepStatus
+from app.models.enums import AgentRole, ApprovalStatus, ApprovalType, ArtifactType, RunStatus, StepKind, StepStatus
 from app.graph.workflow import build_graph
 from app.services.developer_agent import (
     answer_simple_question,
@@ -203,6 +203,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
                 run_id=run.id,
                 step_id=implementation_step.id,
                 title=f"Approve developer edits ({summary['count']} file(s))",
+                approval_type=ApprovalType.EDIT_PROPOSAL,
                 status=ApprovalStatus.PENDING,
                 requested_payload_json={
                     'proposal_file': proposal_path,
@@ -298,6 +299,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             run_id=run.id,
             step_id=review_step.id,
             title='Review failed run',
+            approval_type=ApprovalType.GOVERNANCE,
             status=ApprovalStatus.PENDING,
             requested_payload_json={
                 'implementation_ok': inspect_result['ok'],

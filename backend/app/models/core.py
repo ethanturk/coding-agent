@@ -4,7 +4,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.enums import AgentRole, ApprovalStatus, ArtifactType, EnvironmentStatus, PullRequestStatus, RunStatus, StepKind, StepStatus
+from app.models.enums import AgentRole, ApprovalStatus, ApprovalType, ArtifactType, EnvironmentStatus, PullRequestStatus, RunStatus, StepKind, StepStatus
 
 
 class Project(Base):
@@ -83,6 +83,12 @@ class Approval(Base):
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     step_id: Mapped[str | None] = mapped_column(ForeignKey("steps.id", ondelete="SET NULL"), index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
+    approval_type: Mapped[ApprovalType] = mapped_column(
+        Enum(ApprovalType, name="approval_type", values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        index=True,
+        nullable=False,
+        default=ApprovalType.GOVERNANCE,
+    )
     status: Mapped[ApprovalStatus] = mapped_column(Enum(ApprovalStatus, name="approval_status"), index=True, nullable=False, default=ApprovalStatus.PENDING)
     requested_payload_json: Mapped[dict | None] = mapped_column(JSONB)
     response_payload_json: Mapped[dict | None] = mapped_column(JSONB)

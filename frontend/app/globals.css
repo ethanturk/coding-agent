@@ -29,9 +29,13 @@ main { min-height: 100vh; }
 .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
 .kpi-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
 .kpi-value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+.table-wrap { width: 100%; overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .badge { display: inline-flex; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--panel-2); }
+.muted { color: var(--muted); }
+.stack-sm { display: grid; gap: 6px; }
+.inline-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .badge.completed { color: #86efac; }
 .badge.running { color: #67e8f9; }
 .badge.failed, .badge.blocked, .badge.waiting_for_human { color: #fca5a5; }

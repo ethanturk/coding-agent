@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Approval, Artifact, Event, ExecutionEnvironment, Run
-from app.models.enums import ApprovalStatus, ArtifactType, RunStatus
+from app.models.enums import ApprovalStatus, ApprovalType, ArtifactType, RunStatus
 from app.services.docker_runner import edit_file_in_container
 from app.services.executor import execute_run
 from app.services.runs import _id
@@ -19,6 +19,7 @@ def list_approvals(run_id: str, db: Session = Depends(get_db)):
             "run_id": a.run_id,
             "step_id": a.step_id,
             "title": a.title,
+            "approval_type": a.approval_type,
             "status": a.status,
             "requested_payload_json": a.requested_payload_json,
         }
@@ -38,6 +39,9 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
     proposals = (approval.requested_payload_json or {}).get('proposals') if approval.requested_payload_json else None
     single = approval.requested_payload_json if approval.requested_payload_json and 'path' in approval.requested_payload_json else None
     proposal_items = proposals or ([single] if single else [])
+
+    if approval.approval_type == ApprovalType.PR_MERGE:
+        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "message": "PR merge approvals should be handled via the PR lifecycle action."}
 
     if proposal_items and run and env and env.container_id:
         applied_paths = []

@@ -2,6 +2,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.models.enums import AgentRole, RunStatus, StepKind, StepStatus
+from app.schemas.run_operator_summary import RunListOperatorSummary, RunOperatorSummary
 
 
 class RunCreate(BaseModel):
@@ -37,5 +38,21 @@ class RunRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     steps: list[StepRead] = []
+    operator_summary: RunOperatorSummary | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class RunListRead(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    goal: str
+    status: RunStatus
+    current_step_id: str | None = None
+    final_summary: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    operator_summary: RunListOperatorSummary | None = None
 
     model_config = {"from_attributes": True}

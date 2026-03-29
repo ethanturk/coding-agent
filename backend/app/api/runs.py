@@ -4,22 +4,37 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import Event, ExecutionEnvironment
 from app.models.enums import EnvironmentStatus, RunStatus
-from app.schemas.run import RunCreate, RunRead
+from app.schemas.run import RunCreate, RunListRead, RunRead
 from app.services.docker_runner import destroy_container
 from app.services.executor import execute_run
+from app.services.run_operator_summary import build_run_list_operator_summary, build_run_operator_summary
 from app.services.runs import _id, create_run, get_run, list_runs
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
+def _serialize_run(db: Session, run):
+    data = RunRead.model_validate(run).model_dump()
+    data['operator_summary'] = build_run_operator_summary(db, run).model_dump()
+    return data
+
+
+def _serialize_run_list_item(db: Session, run):
+    data = RunListRead.model_validate(run).model_dump()
+    data['operator_summary'] = build_run_list_operator_summary(db, run).model_dump()
+    return data
+
+
 @router.post("", response_model=RunRead)
 def create_run_route(payload: RunCreate, db: Session = Depends(get_db)):
-    return create_run(db, payload)
+    run = create_run(db, payload)
+    return _serialize_run(db, run)
 
 
-@router.get("", response_model=list[RunRead])
+@router.get("", response_model=list[RunListRead])
 def list_runs_route(db: Session = Depends(get_db)):
-    return list_runs(db)
+    runs = list_runs(db)
+    return [_serialize_run_list_item(db, run) for run in runs]
 
 
 @router.get("/{run_id}", response_model=RunRead)
@@ -27,7 +42,7 @@ def get_run_route(run_id: str, db: Session = Depends(get_db)):
     run = get_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return run
+    return _serialize_run(db, run)
 
 
 @router.post("/{run_id}/execute", response_model=RunRead)
@@ -53,7 +68,7 @@ def execute_run_route(run_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e)) from e
     if not updated:
         raise HTTPException(status_code=404, detail="Run not found")
-    return updated
+    return _serialize_run(db, updated)
 
 
 @router.post("/{run_id}/retry", response_model=RunRead)
@@ -68,7 +83,7 @@ def retry_run_route(run_id: str, db: Session = Depends(get_db)):
     if run.status == RunStatus.CANCELLED:
         raise HTTPException(status_code=400, detail="Cannot retry a cancelled run")
     try:
-        return execute_run(db, run_id)
+        return _serialize_run(db, execute_run(db, run_id))
     except ValueError as e:
         run.status = RunStatus.FAILED
         run.final_summary = str(e)
@@ -98,7 +113,7 @@ def cancel_run_route(run_id: str, db: Session = Depends(get_db)):
     db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.cancelled', payload_json={'cleanup': bool(env)}))
     db.commit()
     db.refresh(run)
-    return run
+    return _serialize_run(db, run)
 
 
 @router.delete("/{run_id}")

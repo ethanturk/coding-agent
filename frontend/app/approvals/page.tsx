@@ -25,11 +25,12 @@ export default async function ApprovalsPage() {
       </div>
       <section className="card">
         <table className="table">
-          <thead><tr><th>Run</th><th>Approval</th><th>Status</th></tr></thead>
+          <thead><tr><th>Run</th><th>Type</th><th>Approval</th><th>Status</th></tr></thead>
           <tbody>
             {approvals.map((approval: any) => (
               <tr key={approval.id}>
                 <td><a href={`/runs/${approval.run.id}`}>{approval.run.title}</a></td>
+                <td>{approval.approval_type === 'edit_proposal' ? 'Edit Proposal' : approval.approval_type === 'pr_merge' ? 'PR Merge' : 'Governance'}</td>
                 <td>{approval.title}</td>
                 <td><span className={`badge ${approval.status}`}>{approval.status}</span></td>
               </tr>

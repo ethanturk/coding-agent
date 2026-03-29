@@ -3,8 +3,12 @@ import { redirect } from 'next/navigation';
 
 import { Approvals } from '../../../components/approvals';
 import { LiveEvents } from '../../../components/live-events';
+import { PlannedFileActionsTable } from '../../../components/planned-file-actions-table';
+import { PrLifecycleCard } from '../../../components/pr-lifecycle-card';
+import { RunStageBadge } from '../../../components/run-stage-badge';
 import { RunTimeline } from '../../../components/run-timeline';
 import { StepDetail } from '../../../components/step-detail';
+import { ValidationSummaryCard } from '../../../components/validation-summary-card';
 
 async function getRun(id: string) {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
@@ -48,13 +52,6 @@ async function getEnvironment(id: string) {
   return res.json();
 }
 
-async function getPullRequest(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs/${id}/pull-request/meta`, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
-}
-
 async function readArtifactJson(artifacts: any[], name: string) {
   const artifact = artifacts.find((item) => item.name === name);
   if (!artifact?.storage_uri) return null;
@@ -91,28 +88,92 @@ async function deleteRun(formData: FormData) {
 
 export default async function RunDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [run, events, artifacts, approvals, runDiff, environment, pullRequest] = await Promise.all([getRun(id), getEvents(id), getArtifacts(id), getApprovals(id), getRunDiff(id), getEnvironment(id), getPullRequest(id)]);
+  const [run, events, artifacts, approvals, runDiff, environment] = await Promise.all([
+    getRun(id),
+    getEvents(id),
+    getArtifacts(id),
+    getApprovals(id),
+    getRunDiff(id),
+    getEnvironment(id),
+  ]);
   if (!run) return <main style={{ padding: 24 }}>Run not found</main>;
 
   const searchContext = await readArtifactJson(artifacts, 'developer-search-context.json');
   const editPlan = await readArtifactJson(artifacts, 'developer-edit-plan.json');
   const llmPlan = await readArtifactJson(artifacts, 'developer-llm-plan.json');
   const editCandidates = await readArtifactJson(artifacts, 'developer-edit-candidates.json');
-  const testingStep = run.steps.find((step: any) => step.title === 'Run smoke test command');
-  const buildStep = run.steps.find((step: any) => step.title === 'Run build command');
-  const lintStep = run.steps.find((step: any) => step.title === 'Run lint command');
+  const operatorSummary = run.operator_summary;
 
   return (
     <main className="grid">
       <section className="card">
         <h1 className="page-title">{run.title}</h1>
         <p className="page-subtitle">{run.goal}</p>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div className="inline-actions">
           <span className={`badge ${run.status}`}>{run.status}</span>
+          <RunStageBadge stage={operatorSummary?.stage} />
           <a href={`/runs/${id}/diff`}>View run diff</a>
           <a href={`/runs/${id}/workspace`}>Open workspace</a>
+          {operatorSummary?.pr?.pr_url ? (
+            <a href={operatorSummary.pr.pr_url} target="_blank" rel="noreferrer">Open PR on GitHub</a>
+          ) : null}
         </div>
       </section>
+
+      <section className="card">
+        <h2 className="section-title">Overview</h2>
+        <div className="table-wrap">
+          <table className="table">
+            <tbody>
+              <tr><td>Stage</td><td>{operatorSummary?.stage || '—'}</td></tr>
+              <tr><td>Planned files</td><td>{operatorSummary?.file_actions?.length || 0}</td></tr>
+              <tr><td>PR status</td><td>{operatorSummary?.pr?.status || 'not_created'}</td></tr>
+              <tr><td>Validation</td><td>{`test ${operatorSummary?.validation?.test?.state || 'not_run'}, build ${operatorSummary?.validation?.build?.state || 'not_run'}, lint ${operatorSummary?.validation?.lint?.state || 'not_run'}`}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2 className="section-title">Planned File Actions</h2>
+        <p className="page-subtitle">What the agent intends to do to each file.</p>
+        <PlannedFileActionsTable actions={operatorSummary?.file_actions || []} />
+      </section>
+
+      <section className="card">
+        <h2 className="section-title">Validation Summary</h2>
+        <ValidationSummaryCard validation={operatorSummary?.validation} />
+      </section>
+
+      <section className="card">
+        <h2 className="section-title">Pull Request Lifecycle</h2>
+        <PrLifecycleCard pr={operatorSummary?.pr} runId={id} />
+      </section>
+
+      <section className="card">
+        <h2 className="section-title">Environment</h2>
+        {environment ? (
+          <div className="table-wrap"><table className="table"><tbody>
+            <tr><td>Provider</td><td>{environment.provider}</td></tr>
+            <tr><td>Status</td><td>{environment.status}</td></tr>
+            <tr><td>Image</td><td>{environment.image || '—'}</td></tr>
+            <tr><td>Branch</td><td>{environment.branch_name || '—'}</td></tr>
+            <tr><td>Repo Dir</td><td>{environment.repo_dir || '—'}</td></tr>
+          </tbody></table></div>
+        ) : <p className="page-subtitle">No execution environment recorded.</p>}
+      </section>
+
+      <section className="card">
+        <h2 className="section-title">Changed Files</h2>
+        <ul>
+          {(runDiff.changed_files || []).map((line: string, i: number) => <li key={i}>{line}</li>)}
+        </ul>
+      </section>
+
+      <section className="card">
+        <RunTimeline events={events} />
+      </section>
+
       <section className="card">
         <h2 className="section-title">Steps</h2>
         <ul>
@@ -122,12 +183,10 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
         </ul>
         <StepDetail steps={run.steps} />
       </section>
+
       <section className="card">
-        <RunTimeline events={events} />
-      </section>
-      <section className="card">
-        <h2 className="section-title">Edit Discovery</h2>
-        <p className="page-subtitle">Why the agent picked these files and what it thinks they mean.</p>
+        <h2 className="section-title">Planning Internals</h2>
+        <p className="page-subtitle">Raw planning/debug data retained for deeper inspection.</p>
         <div className="grid">
           <div>
             <strong>Search terms</strong>
@@ -146,9 +205,6 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
             <ul>{(editPlan?.secondary_targets || []).map((path: string) => <li key={path}>{path}</li>)}</ul>
           </div>
         </div>
-      </section>
-      <section className="card">
-        <h2 className="section-title">Planning Notes</h2>
         <p><strong>Dependency groups:</strong> {(editPlan?.dependency_groups || []).join(', ') || '—'}</p>
         <p><strong>LLM summary:</strong> {editPlan?.llm_summary || llmPlan?.content?.summary || 'No LLM summary available.'}</p>
         <ul>
@@ -182,45 +238,7 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
           </>
         ) : <p className="page-subtitle">LLM planner not used: {llmPlan?.reason || 'not configured'}</p>}
       </section>
-      <section className="card">
-        <h2 className="section-title">Environment</h2>
-        {environment ? (
-          <table className="table"><tbody>
-            <tr><td>Provider</td><td>{environment.provider}</td></tr>
-            <tr><td>Status</td><td>{environment.status}</td></tr>
-            <tr><td>Image</td><td>{environment.image || '—'}</td></tr>
-            <tr><td>Branch</td><td>{environment.branch_name || '—'}</td></tr>
-            <tr><td>Repo Dir</td><td>{environment.repo_dir || '—'}</td></tr>
-          </tbody></table>
-        ) : <p className="page-subtitle">No execution environment recorded.</p>}
-      </section>
-      <section className="card">
-        <h2 className="section-title">Pull Request</h2>
-        {pullRequest ? (
-          <table className="table"><tbody>
-            <tr><td>Status</td><td>{pullRequest.status}</td></tr>
-            <tr><td>Branch</td><td>{pullRequest.branch_name || '—'}</td></tr>
-            <tr><td>PR</td><td>{pullRequest.pr_url ? <a href={pullRequest.pr_url} target="_blank">#{pullRequest.pr_number}</a> : '—'}</td></tr>
-          </tbody></table>
-        ) : <p className="page-subtitle">No pull request recorded.</p>}
-      </section>
-      <section className="card">
-        <h2 className="section-title">Execution Outcome</h2>
-        <table className="table">
-          <thead><tr><th>Stage</th><th>Status</th><th>Summary</th></tr></thead>
-          <tbody>
-            <tr><td>Test</td><td>{testingStep?.status || '—'}</td><td>{testingStep?.output_json?.summary || testingStep?.error_summary || '—'}</td></tr>
-            <tr><td>Build</td><td>{buildStep?.status || '—'}</td><td>{buildStep?.output_json?.stderr || buildStep?.output_json?.stdout || buildStep?.error_summary || '—'}</td></tr>
-            <tr><td>Lint</td><td>{lintStep?.status || '—'}</td><td>{lintStep?.output_json?.stderr || lintStep?.output_json?.stdout || lintStep?.error_summary || '—'}</td></tr>
-          </tbody>
-        </table>
-      </section>
-      <section className="card">
-        <h2 className="section-title">Changed Files</h2>
-        <ul>
-          {(runDiff.changed_files || []).map((line: string, i: number) => <li key={i}>{line}</li>)}
-        </ul>
-      </section>
+
       <section className="card">
         <h2 className="section-title">Artifacts</h2>
         <ul>
@@ -249,6 +267,7 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
           ) : null}
         </div>
       </section>
+
       <section className="card">
         <LiveEvents runId={id} />
       </section>

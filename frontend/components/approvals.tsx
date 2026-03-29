@@ -1,5 +1,12 @@
 'use client';
 
+function approvalTypeLabel(type?: string) {
+  if (type === 'edit_proposal') return 'Edit Proposal Approval';
+  if (type === 'pr_merge') return 'PR Merge Approval';
+  if (type === 'governance') return 'Governance Approval';
+  return 'Approval';
+}
+
 export function Approvals({ approvals }: { approvals: any[] }) {
   async function approve(id: string) {
     const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
@@ -15,7 +22,9 @@ export function Approvals({ approvals }: { approvals: any[] }) {
       <ul>
         {approvals.map((approval) => (
           <li key={approval.id}>
-            <div>{approval.title} — {approval.status}</div>
+            <div>
+              <strong>{approvalTypeLabel(approval.approval_type)}</strong>: {approval.title} — {approval.status}
+            </div>
             {approval.requested_payload_json?.summary ? (
               <div style={{ color: 'var(--muted)', marginTop: 6 }}>
                 {approval.requested_payload_json.summary.summary}
@@ -42,7 +51,9 @@ export function Approvals({ approvals }: { approvals: any[] }) {
               </pre>
             ) : null}
             {approval.status === 'pending' && (
-              <button onClick={() => approve(approval.id)} style={{ marginLeft: 8 }}>Approve & Resume</button>
+              <button onClick={() => approve(approval.id)} style={{ marginLeft: 8 }}>
+                {approval.approval_type === 'pr_merge' ? 'Approve & Merge PR' : 'Approve & Resume'}
+              </button>
             )}
           </li>
         ))}

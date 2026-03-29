@@ -44,6 +44,12 @@ class ApprovalStatus(str, enum.Enum):
     REJECTED = "rejected"
 
 
+class ApprovalType(str, enum.Enum):
+    EDIT_PROPOSAL = "edit_proposal"
+    PR_MERGE = "pr_merge"
+    GOVERNANCE = "governance"
+
+
 class ArtifactType(str, enum.Enum):
     LOG = "log"
     DIFF = "diff"

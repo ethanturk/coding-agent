@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Approval, Artifact, Event, ExecutionEnvironment, Run
-from app.models.enums import ApprovalStatus, ArtifactType
+from app.models.enums import ApprovalStatus, ApprovalType, ArtifactType
 from app.services.runs import _id
 
 router = APIRouter(prefix="/runs", tags=["proposals"])
@@ -43,6 +43,7 @@ def propose_edit(run_id: str, payload: dict, db: Session = Depends(get_db)):
         run_id=run.id,
         step_id=run.current_step_id,
         title=f'Approve edit for {path}',
+        approval_type=ApprovalType.EDIT_PROPOSAL,
         status=ApprovalStatus.PENDING,
         requested_payload_json=proposal_payload,
     )
