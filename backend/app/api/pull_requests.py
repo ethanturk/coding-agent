@@ -42,6 +42,13 @@ def open_pull_request(run_id: str, db: Session = Depends(get_db)):
     pr.pr_number = payload.get('number')
     pr.pr_url = payload.get('url')
     pr.status = PullRequestStatus.OPEN
+    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='pull_request.opened', payload_json={
+        'pr_id': pr.id,
+        'pr_number': pr.pr_number,
+        'pr_url': pr.pr_url,
+        'branch_name': pr.branch_name,
+        'repo': pr.repo,
+    }))
     db.commit()
     db.refresh(pr)
     return {'id': pr.id, 'number': pr.pr_number, 'url': pr.pr_url, 'status': pr.status}
@@ -73,6 +80,18 @@ def refresh_run_pull_request(run_id: str, db: Session = Depends(get_db)):
 
     merge_commit = payload.get('mergeCommit') or {}
     pr.merge_commit_sha = merge_commit.get('oid') or pr.merge_commit_sha
+    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='pull_request.refreshed', payload_json={
+        'pr_id': pr.id,
+        'pr_number': pr.pr_number,
+        'pr_url': pr.pr_url,
+        'status': pr.status.value if hasattr(pr.status, 'value') else pr.status,
+        'title': payload.get('title'),
+        'review_decision': payload.get('reviewDecision'),
+        'is_draft': payload.get('isDraft'),
+        'base_ref_name': payload.get('baseRefName'),
+        'head_ref_name': payload.get('headRefName'),
+        'merge_commit_sha': pr.merge_commit_sha,
+    }))
     db.commit()
     db.refresh(pr)
     return {
@@ -109,6 +128,13 @@ def merge_run_pull_request(run_id: str, db: Session = Depends(get_db)):
     env = db.query(ExecutionEnvironment).filter_by(run_id=run_id).first()
     if env:
         destroy_container(db, env)
+    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='pull_request.merged', payload_json={
+        'pr_id': pr.id,
+        'pr_number': pr.pr_number,
+        'pr_url': pr.pr_url,
+        'summary': run.final_summary,
+        'merge_commit_sha': pr.merge_commit_sha,
+    }))
     db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.completed', payload_json={'summary': run.final_summary, 'pr_url': pr.pr_url}))
     db.commit()
     return {'ok': True, 'status': pr.status, 'summary': run.final_summary}
