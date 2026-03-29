@@ -86,8 +86,15 @@ async function deleteRun(formData: FormData) {
   redirect('/runs');
 }
 
-export default async function RunDetail({ params }: { params: Promise<{ id: string }> }) {
+export default async function RunDetail({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ launchError?: string }>;
+}) {
   const { id } = await params;
+  const { launchError } = await searchParams;
   const [run, events, artifacts, approvals, runDiff, environment] = await Promise.all([
     getRun(id),
     getEvents(id),
@@ -109,6 +116,7 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
       <section className="card">
         <h1 className="page-title">{run.title}</h1>
         <p className="page-subtitle">{run.goal}</p>
+        {launchError ? <p className="page-subtitle" style={{ color: 'var(--warning)' }}>{decodeURIComponent(launchError)}</p> : null}
         <div className="inline-actions">
           <span className={`badge ${run.status}`}>{run.status}</span>
           <RunStageBadge stage={operatorSummary?.stage} />

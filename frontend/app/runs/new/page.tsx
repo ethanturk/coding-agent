@@ -27,7 +27,8 @@ async function createRun(formData: FormData) {
   const executeRes = await fetch(`${base}/api/runs/${run.id}/execute`, { method: 'POST' });
   if (!executeRes.ok) {
     const text = await executeRes.text();
-    throw new Error(`Failed to execute run ${run.id}: ${text}`);
+    const message = encodeURIComponent(`Execution failed to start cleanly: ${text}`);
+    redirect(`/runs/${run.id}?launchError=${message}`);
   }
 
   redirect(`/runs/${run.id}`);
