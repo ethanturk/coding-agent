@@ -31,6 +31,20 @@ class LLMClientError(RuntimeError):
         self.status_code = status_code
 
 
+def _strip_provider_prefix(model: str) -> str:
+    if '/' in model:
+        return model.split('/', 1)[1]
+    return model
+
+
+def _compatible_model_name(api_base: str, model: str) -> str:
+    raw_model = _strip_provider_prefix(model)
+    lower_base = (api_base or '').lower()
+    if 'lmstudio' in lower_base or '127.0.0.1:1234' in lower_base or '192.168.5.203:1234' in lower_base:
+        return f'lm_studio/{raw_model}'
+    return f'openai/{raw_model}'
+
+
 def resolve_role_llm_config(settings: dict, role: str) -> dict:
     role_cfg = resolve_role_model(settings, role) or {}
     provider = role_cfg.get('provider') or settings.get('default', {}).get('provider') or 'openai'
@@ -47,13 +61,15 @@ def resolve_role_llm_config(settings: dict, role: str) -> dict:
         cfg = providers.get('openai_compatible', {})
         api_base = (cfg.get('base_url') or '').rstrip('/')
         api_key = cfg.get('api_key') or ''
-        model_name = model or cfg.get('model') or ''
+        raw_model = model or cfg.get('model') or ''
+        model_name = _compatible_model_name(api_base, raw_model)
         supports_native_json = False
     elif provider == 'z_ai_coding':
         cfg = providers.get('z_ai_coding', {})
         api_base = (cfg.get('base_url') or 'https://api.z.ai/api/coding/paas/v4').rstrip('/')
         api_key = cfg.get('api_key') or ''
-        model_name = model or cfg.get('model') or ''
+        raw_model = model or cfg.get('model') or ''
+        model_name = _compatible_model_name(api_base, raw_model)
         supports_native_json = False
     else:
         raise ValueError(f'Unsupported provider: {provider}')
