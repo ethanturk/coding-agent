@@ -535,12 +535,13 @@ This order gets the highest-value failing path under control quickly while minim
 
 ## Definition of Done
 The LiteLLM migration is complete when:
-- all current chat-style LLM calls in rewrite/planner/edits go through `llm_client.py`
+- all current LLM-backed rewrite/planner/developer-edit calls go through `llm_client.py`
 - provider/model selection still respects current settings and role overrides
 - JSON generation works across configured providers without fragile request-shape hacks in leaf modules
+- Codex-sensitive developer calls use the Responses-style branch rather than chat completions
 - LLM transport failures are actionable and visible in run diagnostics
-- the previously failing execution path no longer fails for provider-specific structured output drift
-- legacy raw transport logic is removed or isolated behind a temporary fallback switch
+- the previously failing execution path no longer fails for provider-specific structured output drift or Codex endpoint mismatch
+- dead raw transport helpers for migrated paths are removed or isolated behind a temporary fallback switch
 
 ---
 
