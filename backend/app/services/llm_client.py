@@ -178,26 +178,57 @@ def _response_text_from_responses_api(response: Any) -> str:
     raw = _raw_dump(response)
     if raw.get('output_text'):
         return str(raw['output_text']).strip()
+
+    def as_mapping(value: Any) -> dict | None:
+        if isinstance(value, dict):
+            return value
+        if hasattr(value, 'model_dump'):
+            try:
+                dumped = value.model_dump()
+                if isinstance(dumped, dict):
+                    return dumped
+            except Exception:
+                return None
+        if hasattr(value, '__dict__'):
+            try:
+                return {k: v for k, v in vars(value).items() if not k.startswith('_')}
+            except Exception:
+                return None
+        return None
+
+    def extract_text(value: Any) -> list[str]:
+        texts: list[str] = []
+        if value is None:
+            return texts
+        if isinstance(value, str):
+            if value.strip():
+                texts.append(value)
+            return texts
+        if isinstance(value, list):
+            for item in value:
+                texts.extend(extract_text(item))
+            return texts
+        mapping = as_mapping(value)
+        if mapping is not None:
+            text = mapping.get('text')
+            if isinstance(text, str) and text.strip():
+                texts.append(text)
+            elif text is not None:
+                texts.extend(extract_text(text))
+            value_field = mapping.get('value')
+            if isinstance(value_field, str) and value_field.strip():
+                texts.append(value_field)
+            content = mapping.get('content')
+            if content is not None:
+                texts.extend(extract_text(content))
+            output_text = mapping.get('output_text')
+            if output_text is not None:
+                texts.extend(extract_text(output_text))
+            return texts
+        return texts
+
     output = getattr(response, 'output', None) or raw.get('output') or []
-    texts: list[str] = []
-    for item in output:
-        item_type = item.get('type') if isinstance(item, dict) else getattr(item, 'type', None)
-        if item_type not in {'message', 'output_text', 'output_item.done'}:
-            continue
-        content = item.get('content') if isinstance(item, dict) else getattr(item, 'content', None)
-        if isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict):
-                    text = part.get('text')
-                    if isinstance(text, dict):
-                        value = text.get('value')
-                        if value:
-                            texts.append(str(value))
-                    elif text:
-                        texts.append(str(text))
-        text = item.get('text') if isinstance(item, dict) else getattr(item, 'text', None)
-        if text:
-            texts.append(str(text))
+    texts = extract_text(output)
     return '\n'.join(t for t in texts if t).strip()
 
 
