@@ -165,9 +165,13 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
 
       <section className="card">
         <h2 className="section-title">Changed Files</h2>
-        <ul>
-          {(runDiff.changed_files || []).map((line: string, i: number) => <li key={i}>{line}</li>)}
-        </ul>
+        {(runDiff.changed_files || []).length ? (
+          <ul>
+            {(runDiff.changed_files || []).map((line: string, i: number) => <li key={i}>{line}</li>)}
+          </ul>
+        ) : (
+          <p className="page-subtitle">No changed-file snapshot is available for this run yet.</p>
+        )}
       </section>
 
       <section className="card">

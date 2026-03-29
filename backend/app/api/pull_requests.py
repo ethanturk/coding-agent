@@ -47,6 +47,23 @@ def open_pull_request(run_id: str, db: Session = Depends(get_db)):
     return {'id': pr.id, 'number': pr.pr_number, 'url': pr.pr_url, 'status': pr.status}
 
 
+@router.post("/{run_id}/pull-request/refresh")
+def refresh_run_pull_request(run_id: str, db: Session = Depends(get_db)):
+    run = db.get(Run, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    pr = db.query(PullRequest).filter(PullRequest.run_id == run_id).order_by(PullRequest.created_at.desc()).first()
+    if not pr:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    return {
+        'id': pr.id,
+        'number': pr.pr_number,
+        'url': pr.pr_url,
+        'status': pr.status,
+        'provider': pr.provider,
+    }
+
+
 @router.post("/{run_id}/pull-request/merge")
 def merge_run_pull_request(run_id: str, db: Session = Depends(get_db)):
     run = db.get(Run, run_id)

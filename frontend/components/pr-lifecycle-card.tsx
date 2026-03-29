@@ -18,6 +18,12 @@ export function PrLifecycleCard({ pr, runId }: { pr?: PrState | null; runId: str
     location.reload();
   }
 
+  async function refreshPullRequest() {
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
+    await fetch(`${base}/api/runs/${runId}/pull-request/refresh`, { method: 'POST' });
+    location.reload();
+  }
+
   async function mergePullRequest() {
     const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
     await fetch(`${base}/api/runs/${runId}/pull-request/merge`, { method: 'POST' });
@@ -68,6 +74,7 @@ export function PrLifecycleCard({ pr, runId }: { pr?: PrState | null; runId: str
       <div className="inline-actions">
         {pr.pr_url ? <a href={pr.pr_url} target="_blank" rel="noreferrer">Open on GitHub</a> : null}
         {!pr.pr_url ? <button style={{ width: 'auto' }} onClick={openPullRequest}>Open Pull Request</button> : null}
+        {pr.pr_url ? <button style={{ width: 'auto' }} onClick={refreshPullRequest}>Refresh PR State</button> : null}
         {pr.status === 'open' ? <button style={{ width: 'auto' }} onClick={mergePullRequest}>Approve & Merge PR</button> : null}
       </div>
     </div>

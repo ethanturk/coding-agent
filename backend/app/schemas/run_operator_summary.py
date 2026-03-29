@@ -48,6 +48,7 @@ class RunPrState(BaseModel):
     review_state: str | None = None
     mergeable: bool | None = None
     merge_commit_sha: str | None = None
+    provider: str | None = None
 
 
 class PlannedActionCounts(BaseModel):

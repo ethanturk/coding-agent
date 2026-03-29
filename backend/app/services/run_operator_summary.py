@@ -198,7 +198,7 @@ def _derive_file_actions(artifacts: list[Artifact]) -> list[RunFileAction]:
                 rationale=proposal.get('reason'),
                 confidence=None,
                 source='derived',
-                diff_stats=None,
+                diff_stats=_derive_diff_stats_from_patch(str(proposal.get('diff_preview') or '')),
                 validation=None,
             )
         )
@@ -209,9 +209,27 @@ def _derive_file_actions(artifacts: list[Artifact]) -> list[RunFileAction]:
 def _extract_diff_stats(candidate: dict[str, Any]) -> DiffStats | None:
     stats = candidate.get('diff_stats')
     if not isinstance(stats, dict):
+        proposal_diff = candidate.get('diff_preview') or candidate.get('diff')
+        if isinstance(proposal_diff, str) and proposal_diff.strip():
+            return _derive_diff_stats_from_patch(proposal_diff)
         return None
     additions = int(stats.get('additions') or 0)
     deletions = int(stats.get('deletions') or 0)
+    return DiffStats(additions=additions, deletions=deletions)
+
+
+def _derive_diff_stats_from_patch(diff_text: str) -> DiffStats | None:
+    additions = 0
+    deletions = 0
+    for line in diff_text.splitlines():
+        if line.startswith('+++') or line.startswith('---'):
+            continue
+        if line.startswith('+'):
+            additions += 1
+        elif line.startswith('-'):
+            deletions += 1
+    if additions == 0 and deletions == 0:
+        return None
     return DiffStats(additions=additions, deletions=deletions)
 
 
@@ -329,6 +347,7 @@ def _derive_pr_state(project: Project | None, env: ExecutionEnvironment | None, 
             review_state=review_state,
             mergeable=True if status == 'open' else None,
             merge_commit_sha=pr.merge_commit_sha,
+            provider=pr.provider,
         )
 
     if env and env.branch_name:
@@ -344,9 +363,10 @@ def _derive_pr_state(project: Project | None, env: ExecutionEnvironment | None, 
             review_state='pending' if run.status == RunStatus.WAITING_FOR_HUMAN else 'unknown',
             mergeable=None,
             merge_commit_sha=None,
+            provider='github',
         )
 
-    return RunPrState(status='not_created')
+    return RunPrState(status='not_created', provider='github')
 
 
 def _normalize_pr_status(status: PullRequestStatus | str | None) -> str:
