@@ -1,7 +1,9 @@
+import threading
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models import Approval, Artifact, Event, ExecutionEnvironment, Run
 from app.models.enums import ApprovalStatus, ApprovalType, ArtifactType, RunStatus
 from app.services.docker_runner import edit_file_in_container
@@ -9,6 +11,14 @@ from app.services.executor import execute_run
 from app.services.runs import _id
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
+
+
+def _resume_run_async(run_id: str):
+    db = SessionLocal()
+    try:
+        execute_run(db, run_id)
+    finally:
+        db.close()
 
 
 @router.get("/run/{run_id}")
@@ -55,11 +65,11 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
         run.status = RunStatus.QUEUED
         db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.resumed', payload_json={'reason': 'approved_edit_proposal', 'paths': applied_paths}))
         db.commit()
-        resumed = execute_run(db, approval.run_id)
-        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": resumed is not None, "edit_applied": True, "paths": applied_paths}
+        threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "edit_applied": True, "paths": applied_paths}
 
     if run:
         run.status = RunStatus.QUEUED
     db.commit()
-    resumed = execute_run(db, approval.run_id)
-    return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": resumed is not None}
+    threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+    return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True}

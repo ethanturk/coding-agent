@@ -1,4 +1,4 @@
-'use client';
+import { redirect } from 'next/navigation';
 
 function approvalTypeLabel(type?: string) {
   if (type === 'edit_proposal') return 'Edit Proposal Approval';
@@ -7,13 +7,16 @@ function approvalTypeLabel(type?: string) {
   return 'Approval';
 }
 
-export function Approvals({ approvals }: { approvals: any[] }) {
-  async function approve(id: string) {
-    const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-    await fetch(`${base}/api/approvals/${id}/approve`, { method: 'POST' });
-    location.reload();
-  }
+async function approveAction(formData: FormData) {
+  'use server';
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
+  const approvalId = String(formData.get('approval_id'));
+  const runId = String(formData.get('run_id'));
+  await fetch(`${base}/api/approvals/${approvalId}/approve`, { method: 'POST' });
+  redirect(`/runs/${runId}`);
+}
 
+export function Approvals({ approvals, runId }: { approvals: any[]; runId: string }) {
   if (!approvals.length) return null;
 
   return (
@@ -51,9 +54,13 @@ export function Approvals({ approvals }: { approvals: any[] }) {
               </pre>
             ) : null}
             {approval.status === 'pending' && (
-              <button onClick={() => approve(approval.id)} style={{ marginLeft: 8 }}>
-                {approval.approval_type === 'pr_merge' ? 'Approve & Merge PR' : 'Approve & Resume'}
-              </button>
+              <form action={approveAction} style={{ marginTop: 8 }}>
+                <input type="hidden" name="approval_id" value={approval.id} />
+                <input type="hidden" name="run_id" value={runId} />
+                <button type="submit" style={{ marginLeft: 8 }}>
+                  {approval.approval_type === 'pr_merge' ? 'Approve & Merge PR' : 'Approve & Resume'}
+                </button>
+              </form>
             )}
           </li>
         ))}

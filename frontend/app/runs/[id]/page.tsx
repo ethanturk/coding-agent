@@ -270,7 +270,7 @@ export default async function RunDetail({
             </li>
           ))}
         </ul>
-        <Approvals approvals={approvals} />
+        <Approvals approvals={approvals} runId={id} />
         <div style={{ display: 'flex', gap: 12 }}>
           <form action={retryRun}>
             <input type="hidden" name="run_id" value={id} />
