@@ -47,15 +47,13 @@ def resolve_role_llm_config(settings: dict, role: str) -> dict:
         cfg = providers.get('openai_compatible', {})
         api_base = (cfg.get('base_url') or '').rstrip('/')
         api_key = cfg.get('api_key') or ''
-        raw_model = model or cfg.get('model') or ''
-        model_name = f'openai/{raw_model}' if raw_model and not raw_model.startswith('openai/') else raw_model
+        model_name = model or cfg.get('model') or ''
         supports_native_json = False
     elif provider == 'z_ai_coding':
         cfg = providers.get('z_ai_coding', {})
         api_base = (cfg.get('base_url') or 'https://api.z.ai/api/coding/paas/v4').rstrip('/')
         api_key = cfg.get('api_key') or ''
-        raw_model = model or cfg.get('model') or ''
-        model_name = f'openai/{raw_model}' if raw_model and not raw_model.startswith('openai/') else raw_model
+        model_name = model or cfg.get('model') or ''
         supports_native_json = False
     else:
         raise ValueError(f'Unsupported provider: {provider}')
