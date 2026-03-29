@@ -10,6 +10,12 @@ import { RunTimeline } from '../../../components/run-timeline';
 import { StepDetail } from '../../../components/step-detail';
 import { ValidationSummaryCard } from '../../../components/validation-summary-card';
 
+function asStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item));
+  if (typeof value === 'string' && value.trim()) return [value];
+  return [];
+}
+
 async function getRun(id: string) {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
   const res = await fetch(`${base}/api/runs/${id}`, { cache: 'no-store' });
@@ -110,6 +116,8 @@ export default async function RunDetail({
   const llmPlan = await readArtifactJson(artifacts, 'developer-llm-plan.json');
   const editCandidates = await readArtifactJson(artifacts, 'developer-edit-candidates.json');
   const operatorSummary = run.operator_summary;
+  const llmRisks = asStringList(llmPlan?.content?.risks);
+  const llmNotes = asStringList(llmPlan?.content?.notes);
 
   return (
     <main className="grid">
@@ -245,9 +253,9 @@ export default async function RunDetail({
         {llmPlan?.used ? (
           <>
             <p><strong>LLM risks:</strong></p>
-            <ul>{(llmPlan.content?.risks || []).map((risk: string) => <li key={risk}>{risk}</li>)}</ul>
+            {llmRisks.length ? <ul>{llmRisks.map((risk) => <li key={risk}>{risk}</li>)}</ul> : <p className="page-subtitle">No LLM risks recorded.</p>}
             <p><strong>LLM notes:</strong></p>
-            <ul>{(llmPlan.content?.notes || []).map((note: string) => <li key={note}>{note}</li>)}</ul>
+            {llmNotes.length ? <ul>{llmNotes.map((note) => <li key={note}>{note}</li>)}</ul> : <p className="page-subtitle">No LLM notes recorded.</p>}
           </>
         ) : <p className="page-subtitle">LLM planner not used: {llmPlan?.reason || 'not configured'}</p>}
       </section>
