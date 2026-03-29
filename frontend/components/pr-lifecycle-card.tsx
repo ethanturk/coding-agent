@@ -9,6 +9,7 @@ type PrState = {
   status: string;
   review_state?: string | null;
   merge_commit_sha?: string | null;
+  provider?: string | null;
 };
 
 export function PrLifecycleCard({ pr, runId }: { pr?: PrState | null; runId: string }) {
@@ -49,6 +50,10 @@ export function PrLifecycleCard({ pr, runId }: { pr?: PrState | null; runId: str
         <tr>
           <td>Base branch</td>
           <td>{pr.base_branch || '—'}</td>
+        </tr>
+        <tr>
+          <td>Provider</td>
+          <td>{pr.provider || 'github'}</td>
         </tr>
         <tr>
           <td>Review state</td>

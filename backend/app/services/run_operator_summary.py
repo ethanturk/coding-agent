@@ -334,7 +334,7 @@ def _derive_pr_state(project: Project | None, env: ExecutionEnvironment | None, 
         if pr.pr_number:
             pr_title = f'PR #{pr.pr_number}'
         status = _normalize_pr_status(pr.status)
-        review_state = 'approved' if status == 'merged' else 'pending'
+        review_state = _infer_review_state(run, pr, status)
         return RunPrState(
             branch_name=pr.branch_name or getattr(env, 'branch_name', None),
             branch_url=None,
@@ -375,6 +375,17 @@ def _normalize_pr_status(status: PullRequestStatus | str | None) -> str:
     if status == PullRequestStatus.CLOSED or status == 'closed':
         return 'closed'
     return 'open'
+
+
+def _infer_review_state(run: Run, pr: PullRequest, status: str) -> str:
+    if status == 'merged':
+        return 'approved'
+    summary = (run.final_summary or '').lower()
+    if 'changes requested' in summary:
+        return 'changes_requested'
+    if 'approved' in summary:
+        return 'approved'
+    return 'pending'
 
 
 def _derive_stage(run: Run, pr_state: RunPrState) -> str:

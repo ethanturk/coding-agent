@@ -64,6 +64,26 @@ def create_pull_request(repo: str, branch: str, base: str, title: str, body: str
     }
 
 
+def fetch_pull_request(repo: str, pr_number: int) -> dict:
+    result = subprocess.run([
+        'gh', 'pr', 'view', str(pr_number), '--repo', repo,
+        '--json', 'number,url,state,title,headRefName,baseRefName,mergeCommit,reviewDecision,isDraft'
+    ], capture_output=True, text=True)
+    payload = None
+    if result.returncode == 0 and result.stdout.strip():
+        try:
+            payload = json.loads(result.stdout)
+        except Exception:
+            payload = None
+    return {
+        'ok': result.returncode == 0,
+        'stdout': result.stdout,
+        'stderr': result.stderr,
+        'returncode': result.returncode,
+        'payload': payload,
+    }
+
+
 def merge_pull_request(repo: str, pr_number: int) -> dict:
     result = subprocess.run([
         'gh', 'pr', 'merge', str(pr_number), '--repo', repo, '--merge', '--delete-branch'

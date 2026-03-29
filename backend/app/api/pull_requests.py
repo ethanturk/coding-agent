@@ -5,7 +5,7 @@ from app.db.session import get_db
 from app.models import Event, ExecutionEnvironment, Project, PullRequest, Run
 from app.models.enums import PullRequestStatus, RunStatus
 from app.services.docker_runner import bootstrap_repo_in_container, create_container, destroy_container, ensure_docker_environment, push_branch_from_container
-from app.services.pr_runner import create_pull_request, create_pull_request_record, merge_pull_request, repo_slug
+from app.services.pr_runner import create_pull_request, create_pull_request_record, fetch_pull_request, merge_pull_request, repo_slug
 from app.services.runs import _id
 
 router = APIRouter(prefix="/runs", tags=["pull-requests"])
@@ -53,14 +53,40 @@ def refresh_run_pull_request(run_id: str, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     pr = db.query(PullRequest).filter(PullRequest.run_id == run_id).order_by(PullRequest.created_at.desc()).first()
-    if not pr:
+    if not pr or not pr.pr_number or not pr.repo:
         raise HTTPException(status_code=404, detail="Pull request not found")
+
+    fetched = fetch_pull_request(pr.repo, pr.pr_number)
+    if not fetched.get('ok'):
+        raise HTTPException(status_code=400, detail=fetched.get('stderr') or 'Failed to refresh pull request')
+
+    payload = fetched.get('payload') or {}
+    pr.pr_url = payload.get('url') or pr.pr_url
+    pr.branch_name = payload.get('headRefName') or pr.branch_name
+    state = str(payload.get('state') or '').upper()
+    if state == 'MERGED':
+        pr.status = PullRequestStatus.MERGED
+    elif state == 'CLOSED':
+        pr.status = PullRequestStatus.CLOSED
+    else:
+        pr.status = PullRequestStatus.OPEN
+
+    merge_commit = payload.get('mergeCommit') or {}
+    pr.merge_commit_sha = merge_commit.get('oid') or pr.merge_commit_sha
+    db.commit()
+    db.refresh(pr)
     return {
         'id': pr.id,
         'number': pr.pr_number,
         'url': pr.pr_url,
         'status': pr.status,
         'provider': pr.provider,
+        'title': payload.get('title'),
+        'reviewDecision': payload.get('reviewDecision'),
+        'isDraft': payload.get('isDraft'),
+        'baseRefName': payload.get('baseRefName'),
+        'headRefName': payload.get('headRefName'),
+        'mergeCommit': merge_commit,
     }
 
 
