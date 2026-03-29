@@ -10,7 +10,7 @@ type FileAction = {
   } | null;
 };
 
-export function PlannedFileActionsTable({ actions }: { actions: FileAction[] }) {
+export function PlannedFileActionsTable({ actions, runId }: { actions: FileAction[]; runId: string }) {
   if (!actions.length) {
     return <p className="page-subtitle">No planned file actions recorded.</p>;
   }
@@ -32,7 +32,7 @@ export function PlannedFileActionsTable({ actions }: { actions: FileAction[] }) 
             <tr key={action.path}>
               <td>
                 <div className="stack-sm">
-                  <strong>{action.path}</strong>
+                  <strong><a href={`/runs/${runId}/diff?file=${encodeURIComponent(action.path)}`}>{action.path}</a></strong>
                   {action.rationale ? <small className="muted">{action.rationale}</small> : null}
                 </div>
               </td>

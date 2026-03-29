@@ -138,7 +138,7 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
       <section className="card">
         <h2 className="section-title">Planned File Actions</h2>
         <p className="page-subtitle">What the agent intends to do to each file.</p>
-        <PlannedFileActionsTable actions={operatorSummary?.file_actions || []} />
+        <PlannedFileActionsTable actions={operatorSummary?.file_actions || []} runId={id} />
       </section>
 
       <section className="card">
