@@ -45,7 +45,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
     llm_transport = {
         'orchestrator': 'litellm',
         'planner': 'litellm',
-        'developer': 'legacy_http',
+        'developer': 'litellm_responses' if (role_models.get('developer') or {}).get('model') == 'gpt-5.3-codex' else 'legacy_http',
         'tester': 'litellm',
         'reviewer': 'legacy_http',
         'reporter': 'litellm',

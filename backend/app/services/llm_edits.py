@@ -1,8 +1,7 @@
 import json
-import urllib.request
 from pathlib import Path
 
-from app.services.llm_rewrite import _resolve_provider_config
+from app.services.llm_client import llm_chat_json
 from app.services.settings import get_settings, resolve_role_model
 
 
@@ -41,9 +40,10 @@ def build_language_prompt_context(file_path: str, semantic_patch: dict) -> dict:
 
 def suggest_bounded_edit(db, goal: str, file_path: str, current_content: str, semantic_patch: dict) -> dict:
     settings = get_settings(db).value_json
-    provider, model, cfg = _resolve_provider_config(settings)
-    model = (resolve_role_model(settings, 'developer') or {}).get('model') or model
-    if not cfg.get('api_key') or not model:
+    role_cfg = resolve_role_model(settings, 'developer') or {}
+    provider = role_cfg.get('provider') or settings.get('default', {}).get('provider')
+    model = role_cfg.get('model') or settings.get('default', {}).get('model') or ''
+    if not model:
         return {'used': False, 'reason': 'developer model not configured'}
     region = semantic_patch.get('target_region', {})
     lines = current_content.splitlines()
@@ -53,28 +53,29 @@ def suggest_bounded_edit(db, goal: str, file_path: str, current_content: str, se
     system = (
         'You are generating a bounded code edit. '
         'Only respond with JSON matching the provided schema. '
-        'Do not rewrite the whole file. Keep the response scoped to the targeted region.'
+        'Do not rewrite the whole file. Keep the response scoped to the targeted region. '
+        'Respond with raw JSON only.'
     )
     prompt_context = build_language_prompt_context(file_path, semantic_patch)
-    body = {
-        'model': model,
-        'messages': [
+    result = llm_chat_json(
+        db,
+        role='developer',
+        messages=[
             {'role': 'system', 'content': system},
             {'role': 'user', 'content': json.dumps({'goal': goal, 'file_path': file_path, 'semantic_patch': semantic_patch, 'region_context': window, 'prompt_context': prompt_context, 'schema': _llm_edit_schema()})},
         ],
-        'temperature': 0.1,
-        'response_format': {'type': 'json_object'},
-    }
-    req = urllib.request.Request(
-        f"{cfg['base_url']}/chat/completions",
-        data=json.dumps(body).encode('utf-8'),
-        headers={'Content-Type': 'application/json', 'Authorization': f"Bearer {cfg['api_key']}"},
-        method='POST',
+        temperature=0.1,
+        strict_json=False,
+        schema_hint=_llm_edit_schema(),
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        payload = json.loads(resp.read().decode('utf-8'))
-    content = json.loads(payload['choices'][0]['message']['content'].strip())
-    return {'used': True, 'provider': provider, 'model': model, 'content': content}
+    return {
+        'used': True,
+        'provider': provider,
+        'model': model,
+        'mode': result.get('json_mode'),
+        'content': result['parsed'],
+        'raw': result.get('raw'),
+    }
 
 
 def validate_llm_edit_response(llm_edit: dict) -> dict:

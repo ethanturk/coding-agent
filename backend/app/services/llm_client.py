@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from litellm import completion
+from litellm import completion, responses
 
 from app.services.llm_json import parse_llm_json_text
 from app.services.settings import get_settings, resolve_role_model
@@ -114,6 +114,39 @@ def _usage_dict(response: Any) -> dict | None:
     return None
 
 
+def _responses_input_from_messages(messages: list[dict]) -> list[dict]:
+    items: list[dict] = []
+    for message in messages:
+        items.append(
+            {
+                'type': 'message',
+                'role': message['role'],
+                'content': [{'type': 'input_text', 'text': message['content']}],
+            }
+        )
+    return items
+
+
+def _response_text_from_responses_api(response: Any) -> str:
+    output = getattr(response, 'output', None) or []
+    texts: list[str] = []
+    for item in output:
+        item_type = item.get('type') if isinstance(item, dict) else getattr(item, 'type', None)
+        if item_type not in {'message', 'output_text', 'output_item.done'}:
+            continue
+        content = item.get('content') if isinstance(item, dict) else getattr(item, 'content', None)
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict):
+                    text = part.get('text')
+                    if text:
+                        texts.append(text)
+        text = item.get('text') if isinstance(item, dict) else getattr(item, 'text', None)
+        if text:
+            texts.append(text)
+    return '\n'.join(t for t in texts if t).strip()
+
+
 def _wrap_error(exc: Exception, *, config: dict, mode: str) -> LLMClientError:
     status_code = getattr(exc, 'status_code', None)
     response_snippet = None
@@ -144,11 +177,21 @@ def _wrap_error(exc: Exception, *, config: dict, mode: str) -> LLMClientError:
 
 
 LITELLM_SAFE_ROLES = {'orchestrator', 'planner', 'tester', 'reporter'}
+LITELLM_CODEX_MODELS = {'gpt-5.3-codex'}
+
+
+def _is_codex_model(config: dict) -> bool:
+    model = config.get('model') or ''
+    raw = model.split('/', 1)[1] if model.startswith('openai/') else model
+    return raw in LITELLM_CODEX_MODELS
 
 
 def _ensure_litellm_safe_role(config: dict):
-    if config['role'] not in LITELLM_SAFE_ROLES:
-        raise ValueError(f"Role {config['role']} is not yet migrated to LiteLLM")
+    if config['role'] in LITELLM_SAFE_ROLES:
+        return
+    if config['role'] in {'developer', 'reviewer'} and _is_codex_model(config):
+        return
+    raise ValueError(f"Role {config['role']} is not yet migrated to LiteLLM")
 
 
 def llm_chat_text(
@@ -198,8 +241,32 @@ def llm_chat_json(
     if not config.get('model'):
         raise ValueError(f"Model not configured for role {role}")
 
-    args = _litellm_args(config, messages, temperature, None, timeout)
     json_mode = 'prompted_text'
+    if _is_codex_model(config):
+        try:
+            response = responses(
+                model=config['model'],
+                input=_responses_input_from_messages(messages),
+                api_key=config['api_key'],
+                api_base=config.get('api_base'),
+                timeout=timeout,
+            )
+        except Exception as exc:
+            raise _wrap_error(exc, config=config, mode='responses_json') from exc
+        content = _response_text_from_responses_api(response)
+        parsed = parse_llm_json_text(content)
+        return {
+            'provider': config['provider'],
+            'model': config['model'],
+            'content': content,
+            'parsed': parsed,
+            'raw': response.model_dump() if hasattr(response, 'model_dump') else {},
+            'usage': _usage_dict(response),
+            'json_mode': 'responses_prompted_text',
+            'schema_hint': schema_hint,
+        }
+
+    args = _litellm_args(config, messages, temperature, None, timeout)
     if strict_json and config.get('supports_native_json'):
         args['response_format'] = {'type': 'json_object'}
         json_mode = 'native'
