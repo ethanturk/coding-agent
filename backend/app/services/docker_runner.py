@@ -11,7 +11,7 @@ from app.models import ExecutionEnvironment, Project, Run
 from app.models.enums import EnvironmentStatus
 from app.services.runs import _id
 
-BASE = Path('/home/ethanturk/.openclaw/workspace/agent-platform-mvp/runtime_containers')
+BASE = Path('/home/ethanturk/.openclaw/workspace/coding-agent/runtime_containers')
 DEFAULT_IMAGE = 'python:3.11.5-slim'
 
 

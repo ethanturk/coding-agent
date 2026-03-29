@@ -155,11 +155,12 @@ def _wrap_error(exc: Exception, *, config: dict, mode: str) -> LLMClientError:
         body = getattr(response, 'text', None)
         if body:
             response_snippet = str(body)[:1200]
+    endpoint = '/responses' if mode.startswith('responses') else '/chat/completions'
     message = f"{config['role']}/{config['provider']}/{config['model']} {mode} request failed"
     if status_code:
         message += f": HTTP {status_code}"
     if config.get('api_base'):
-        message += f" at {config['api_base']}/chat/completions"
+        message += f" at {config['api_base']}{endpoint}"
     if response_snippet:
         message += f" | response: {response_snippet}"
     elif str(exc):

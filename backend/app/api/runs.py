@@ -33,10 +33,22 @@ def _record_run_failure(db: Session, run, error: Exception | str):
         'error': message,
         'error_type': error.__class__.__name__ if isinstance(error, Exception) else 'Error',
     }
-    for attr in ('provider', 'model', 'role', 'mode', 'api_base', 'status_code'):
+    llm_attrs = {}
+    for attr in ('provider', 'model', 'role', 'mode', 'api_base', 'status_code', 'response_snippet'):
         value = getattr(error, attr, None)
         if value is not None:
             payload[attr] = value
+            llm_attrs[attr] = value
+    if llm_attrs:
+        db.add(
+            Event(
+                id=_id('evt'),
+                run_id=run.id,
+                step_id=run.current_step_id,
+                event_type='llm.request_failed',
+                payload_json=llm_attrs | {'error': message},
+            )
+        )
     db.add(
         Event(
             id=_id('evt'),
