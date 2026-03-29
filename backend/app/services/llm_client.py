@@ -106,15 +106,48 @@ def _litellm_args(config: dict, messages: list[dict], temperature: float, max_to
     return args
 
 
+def _raw_dump(response: Any) -> dict:
+    if hasattr(response, 'model_dump'):
+        try:
+            return response.model_dump()
+        except Exception:
+            return {}
+    return {}
+
+
 def _response_text(response: Any) -> str:
-    choice = response.choices[0]
+    choices = getattr(response, 'choices', None) or []
+    if not choices:
+        raw = _raw_dump(response)
+        return str(raw.get('output_text') or '').strip()
+    choice = choices[0]
     message = getattr(choice, 'message', None)
-    if message is None:
-        return ''
-    content = getattr(message, 'content', '')
-    if isinstance(content, list):
-        return ''.join(part.get('text', '') if isinstance(part, dict) else str(part) for part in content)
-    return str(content or '')
+    if message is None and isinstance(choice, dict):
+        message = choice.get('message')
+    if message is not None:
+        content = getattr(message, 'content', None)
+        if content is None and isinstance(message, dict):
+            content = message.get('content')
+        if isinstance(content, list):
+            texts = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get('text'):
+                        texts.append(str(part['text']))
+                    elif part.get('type') == 'text' and isinstance(part.get('text'), dict) and part['text'].get('value'):
+                        texts.append(str(part['text']['value']))
+                else:
+                    texts.append(str(part))
+            return ''.join(texts).strip()
+        if content:
+            return str(content).strip()
+    text = getattr(choice, 'text', None)
+    if text:
+        return str(text).strip()
+    if isinstance(choice, dict) and choice.get('text'):
+        return str(choice['text']).strip()
+    raw = _raw_dump(response)
+    return str(raw.get('output_text') or '').strip()
 
 
 def _usage_dict(response: Any) -> dict | None:
@@ -142,7 +175,10 @@ def _responses_input_from_messages(messages: list[dict]) -> list[dict]:
 
 
 def _response_text_from_responses_api(response: Any) -> str:
-    output = getattr(response, 'output', None) or []
+    raw = _raw_dump(response)
+    if raw.get('output_text'):
+        return str(raw['output_text']).strip()
+    output = getattr(response, 'output', None) or raw.get('output') or []
     texts: list[str] = []
     for item in output:
         item_type = item.get('type') if isinstance(item, dict) else getattr(item, 'type', None)
@@ -153,11 +189,15 @@ def _response_text_from_responses_api(response: Any) -> str:
             for part in content:
                 if isinstance(part, dict):
                     text = part.get('text')
-                    if text:
-                        texts.append(text)
+                    if isinstance(text, dict):
+                        value = text.get('value')
+                        if value:
+                            texts.append(str(value))
+                    elif text:
+                        texts.append(str(text))
         text = item.get('text') if isinstance(item, dict) else getattr(item, 'text', None)
         if text:
-            texts.append(text)
+            texts.append(str(text))
     return '\n'.join(t for t in texts if t).strip()
 
 
@@ -229,11 +269,24 @@ def llm_chat_text(
         response = completion(**_litellm_args(config, messages, temperature, max_tokens, timeout))
     except Exception as exc:
         raise _wrap_error(exc, config=config, mode='text') from exc
+    content = _response_text(response).strip()
+    raw = _raw_dump(response)
+    if not content:
+        raise LLMClientError(
+            f"{config['role']}/{config['provider']}/{config['model']} text request returned empty content",
+            provider=config['provider'],
+            model=config['model'],
+            role=config['role'],
+            mode='text',
+            api_base=config.get('api_base'),
+            response_snippet=str(raw)[:1200],
+            status_code=None,
+        )
     return {
         'provider': config['provider'],
         'model': config['model'],
-        'content': _response_text(response).strip(),
-        'raw': response.model_dump() if hasattr(response, 'model_dump') else {},
+        'content': content,
+        'raw': raw,
         'usage': _usage_dict(response),
     }
 
@@ -269,13 +322,25 @@ def llm_chat_json(
         except Exception as exc:
             raise _wrap_error(exc, config=config, mode='responses_json') from exc
         content = _response_text_from_responses_api(response)
+        raw = _raw_dump(response)
+        if not content:
+            raise LLMClientError(
+                f"{config['role']}/{config['provider']}/{config['model']} responses_json request returned empty content",
+                provider=config['provider'],
+                model=config['model'],
+                role=config['role'],
+                mode='responses_json',
+                api_base=config.get('api_base'),
+                response_snippet=str(raw)[:1200],
+                status_code=None,
+            )
         parsed = parse_llm_json_text(content)
         return {
             'provider': config['provider'],
             'model': config['model'],
             'content': content,
             'parsed': parsed,
-            'raw': response.model_dump() if hasattr(response, 'model_dump') else {},
+            'raw': raw,
             'usage': _usage_dict(response),
             'json_mode': 'responses_prompted_text',
             'schema_hint': schema_hint,
@@ -292,13 +357,25 @@ def llm_chat_json(
         raise _wrap_error(exc, config=config, mode='json') from exc
 
     content = _response_text(response).strip()
+    raw = _raw_dump(response)
+    if not content:
+        raise LLMClientError(
+            f"{config['role']}/{config['provider']}/{config['model']} json request returned empty content",
+            provider=config['provider'],
+            model=config['model'],
+            role=config['role'],
+            mode='json',
+            api_base=config.get('api_base'),
+            response_snippet=str(raw)[:1200],
+            status_code=None,
+        )
     parsed = parse_llm_json_text(content)
     return {
         'provider': config['provider'],
         'model': config['model'],
         'content': content,
         'parsed': parsed,
-        'raw': response.model_dump() if hasattr(response, 'model_dump') else {},
+        'raw': raw,
         'usage': _usage_dict(response),
         'json_mode': json_mode,
         'schema_hint': schema_hint,
