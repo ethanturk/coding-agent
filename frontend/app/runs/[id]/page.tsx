@@ -1,3 +1,4 @@
+import { readFile } from 'fs/promises';
 import { redirect } from 'next/navigation';
 
 import { Approvals } from '../../../components/approvals';
@@ -54,6 +55,16 @@ async function getPullRequest(id: string) {
   return res.json();
 }
 
+async function readArtifactJson(artifacts: any[], name: string) {
+  const artifact = artifacts.find((item) => item.name === name);
+  if (!artifact?.storage_uri) return null;
+  try {
+    return JSON.parse(await readFile(artifact.storage_uri, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
 async function retryRun(formData: FormData) {
   'use server';
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
@@ -83,6 +94,10 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
   const [run, events, artifacts, approvals, runDiff, environment, pullRequest] = await Promise.all([getRun(id), getEvents(id), getArtifacts(id), getApprovals(id), getRunDiff(id), getEnvironment(id), getPullRequest(id)]);
   if (!run) return <main style={{ padding: 24 }}>Run not found</main>;
 
+  const searchContext = await readArtifactJson(artifacts, 'developer-search-context.json');
+  const editPlan = await readArtifactJson(artifacts, 'developer-edit-plan.json');
+  const llmPlan = await readArtifactJson(artifacts, 'developer-llm-plan.json');
+  const editCandidates = await readArtifactJson(artifacts, 'developer-edit-candidates.json');
   const testingStep = run.steps.find((step: any) => step.title === 'Run smoke test command');
   const buildStep = run.steps.find((step: any) => step.title === 'Run build command');
   const lintStep = run.steps.find((step: any) => step.title === 'Run lint command');
@@ -109,6 +124,63 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
       </section>
       <section className="card">
         <RunTimeline events={events} />
+      </section>
+      <section className="card">
+        <h2 className="section-title">Edit Discovery</h2>
+        <p className="page-subtitle">Why the agent picked these files and what it thinks they mean.</p>
+        <div className="grid">
+          <div>
+            <strong>Search terms</strong>
+            <ul>{(searchContext?.terms || []).map((term: string) => <li key={term}>{term}</li>)}</ul>
+          </div>
+          <div>
+            <strong>Related files</strong>
+            <ul>{(searchContext?.related_files || []).map((path: string) => <li key={path}>{path}</li>)}</ul>
+          </div>
+          <div>
+            <strong>Primary targets</strong>
+            <ul>{(editPlan?.primary_targets || []).map((path: string) => <li key={path}>{path}</li>)}</ul>
+          </div>
+          <div>
+            <strong>Secondary targets</strong>
+            <ul>{(editPlan?.secondary_targets || []).map((path: string) => <li key={path}>{path}</li>)}</ul>
+          </div>
+        </div>
+      </section>
+      <section className="card">
+        <h2 className="section-title">Planning Notes</h2>
+        <p><strong>Dependency groups:</strong> {(editPlan?.dependency_groups || []).join(', ') || '—'}</p>
+        <p><strong>LLM summary:</strong> {editPlan?.llm_summary || llmPlan?.content?.summary || 'No LLM summary available.'}</p>
+        <ul>
+          {(editPlan?.targets || []).map((entry: any) => (
+            <li key={entry.path}>{entry.path} — {entry.priority} — {entry.change_type} — {entry.intent} — {entry.rationale}</li>
+          ))}
+        </ul>
+        <p><strong>Candidate decisions:</strong></p>
+        <ul>
+          {(editCandidates || []).map((candidate: any) => (
+            <li key={candidate.path}>
+              <strong>{candidate.path}</strong> — chosen: {candidate.chosen_candidate} — deterministic score: {candidate.scores?.deterministic} — template score: {candidate.scores?.template_deterministic} — llm score: {candidate.scores?.llm_bounded}
+              <div style={{ marginTop: 4 }}>
+                <small>Deterministic: {candidate.deterministic_candidate?.intent || '—'} / {candidate.deterministic_candidate?.reason || '—'}</small>
+              </div>
+              <div>
+                <small>Template: {candidate.template_candidate?.reason || '—'}</small>
+              </div>
+              <div>
+                <small>LLM: {candidate.llm_candidate?.compiled?.reason || candidate.llm_candidate?.validation?.warnings?.join(', ') || '—'}</small>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {llmPlan?.used ? (
+          <>
+            <p><strong>LLM risks:</strong></p>
+            <ul>{(llmPlan.content?.risks || []).map((risk: string) => <li key={risk}>{risk}</li>)}</ul>
+            <p><strong>LLM notes:</strong></p>
+            <ul>{(llmPlan.content?.notes || []).map((note: string) => <li key={note}>{note}</li>)}</ul>
+          </>
+        ) : <p className="page-subtitle">LLM planner not used: {llmPlan?.reason || 'not configured'}</p>}
       </section>
       <section className="card">
         <h2 className="section-title">Environment</h2>

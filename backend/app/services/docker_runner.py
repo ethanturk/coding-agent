@@ -23,6 +23,16 @@ def get_github_token() -> str | None:
     token = os.environ.get('GITHUB_TOKEN')
     if token:
         return token
+    cred = subprocess.run(
+        ['git', 'credential', 'fill'],
+        input='protocol=https\nhost=github.com\n\n',
+        capture_output=True,
+        text=True,
+    )
+    if cred.returncode == 0:
+        for line in cred.stdout.splitlines():
+            if line.startswith('password='):
+                return line.split('=', 1)[1].strip() or None
     gh = subprocess.run(['gh', 'auth', 'token'], capture_output=True, text=True)
     if gh.returncode == 0 and gh.stdout.strip():
         return gh.stdout.strip()
