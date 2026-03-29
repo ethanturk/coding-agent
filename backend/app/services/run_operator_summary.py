@@ -89,6 +89,7 @@ def build_run_list_operator_summary(db: Session, run: Run) -> RunListOperatorSum
             status=detail.pr.status,
             pr_number=detail.pr.pr_number,
             pr_url=detail.pr.pr_url,
+            review_state=detail.pr.review_state,
         ),
     )
 

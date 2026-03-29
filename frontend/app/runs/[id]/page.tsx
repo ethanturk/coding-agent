@@ -112,6 +112,7 @@ export default async function RunDetail({ params }: { params: Promise<{ id: stri
         <div className="inline-actions">
           <span className={`badge ${run.status}`}>{run.status}</span>
           <RunStageBadge stage={operatorSummary?.stage} />
+          {operatorSummary?.pr?.status === 'open' ? <span className="badge">review: {operatorSummary?.pr?.review_state || 'pending'}</span> : null}
           <a href={`/runs/${id}/diff`}>View run diff</a>
           <a href={`/runs/${id}/workspace`}>Open workspace</a>
           {operatorSummary?.pr?.pr_url ? (

@@ -75,6 +75,7 @@ class RunPrStateSummary(BaseModel):
     status: str
     pr_number: int | None = None
     pr_url: str | None = None
+    review_state: str | None = None
 
 
 class RunOperatorSummary(BaseModel):

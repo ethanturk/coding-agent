@@ -29,6 +29,7 @@ type RunsResponseRow = {
       status?: string;
       pr_number?: number | null;
       pr_url?: string | null;
+      review_state?: string | null;
     };
   };
 };
@@ -109,7 +110,9 @@ function ValidationSummary({ row }: { row: RunsResponseRow }) {
 function PrSummary({ row }: { row: RunsResponseRow }) {
   const pr = row.operator_summary?.pr_summary;
   if (!pr || pr.status === 'not_created') return <span style={{ color: '#6b7280' }}>—</span>;
-  const label = pr.status === 'open' && pr.pr_number ? `PR #${pr.pr_number} open` : pr.status;
+  const baseLabel = pr.status === 'open' && pr.pr_number ? `PR #${pr.pr_number} open` : pr.status;
+  const reviewLabel = pr.review_state && pr.status === 'open' ? ` · ${pr.review_state}` : '';
+  const label = `${baseLabel}${reviewLabel}`;
   if (pr.pr_url) {
     return <a href={pr.pr_url} target="_blank" rel="noreferrer">{label}</a>;
   }
