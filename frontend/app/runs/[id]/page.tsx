@@ -92,6 +92,30 @@ async function deleteRun(formData: FormData) {
   redirect('/runs');
 }
 
+async function openPullRequestAction(formData: FormData) {
+  'use server';
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
+  const runId = String(formData.get('run_id'));
+  await fetch(`${base}/api/runs/${runId}/pull-request`, { method: 'POST' });
+  redirect(`/runs/${runId}`);
+}
+
+async function refreshPullRequestAction(formData: FormData) {
+  'use server';
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
+  const runId = String(formData.get('run_id'));
+  await fetch(`${base}/api/runs/${runId}/pull-request/refresh`, { method: 'POST' });
+  redirect(`/runs/${runId}`);
+}
+
+async function mergePullRequestAction(formData: FormData) {
+  'use server';
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
+  const runId = String(formData.get('run_id'));
+  await fetch(`${base}/api/runs/${runId}/pull-request/merge`, { method: 'POST' });
+  redirect(`/runs/${runId}`);
+}
+
 export default async function RunDetail({
   params,
   searchParams,
@@ -164,7 +188,13 @@ export default async function RunDetail({
 
       <section className="card">
         <h2 className="section-title">Pull Request Lifecycle</h2>
-        <PrLifecycleCard pr={operatorSummary?.pr} runId={id} />
+        <PrLifecycleCard
+          pr={operatorSummary?.pr}
+          runId={id}
+          openPullRequestAction={openPullRequestAction}
+          refreshPullRequestAction={refreshPullRequestAction}
+          mergePullRequestAction={mergePullRequestAction}
+        />
       </section>
 
       <section className="card">
