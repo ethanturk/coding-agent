@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal, get_db
 from app.models import Approval, Artifact, Event, ExecutionEnvironment, Run
 from app.models.enums import ApprovalStatus, ApprovalType, ArtifactType, RunStatus
-from app.services.docker_runner import edit_file_in_container
+from app.services.docker_runner import edit_file_in_container, exec_in_container
 from app.services.executor import execute_run
 from app.services.runs import _id
 
@@ -52,6 +52,27 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
 
     if approval.approval_type == ApprovalType.PR_MERGE:
         return {"ok": True, "status": approval.status, "run_id": approval.run_id, "message": "PR merge approvals should be handled via the PR lifecycle action."}
+
+    cleanup_ops = (approval.requested_payload_json or {}).get('operations') if approval.requested_payload_json else None
+    cleanup_mode = (approval.requested_payload_json or {}).get('mode') if approval.requested_payload_json else None
+
+    if cleanup_mode == 'filesystem_cleanup' and cleanup_ops and run and env and env.container_id:
+        applied_paths = []
+        for op in cleanup_ops:
+            if op.get('type') != 'delete_path':
+                continue
+            rel_path = op['path'].rstrip('/')
+            result = exec_in_container(env, f"cd {env.repo_dir} && rm -rf -- '{rel_path}'")
+            if not result['ok']:
+                raise HTTPException(status_code=400, detail=result.get('stderr') or f"Failed to delete approved path {rel_path}")
+            applied_paths.append(op['path'])
+            db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='filesystem.path_deleted', payload_json={'path': op['path']}))
+        db.add(Artifact(id=_id('art'), run_id=run.id, step_id=run.current_step_id, artifact_type=ArtifactType.LOG, name='filesystem-cleanup.log', storage_uri=f"container://{env.container_id}/{env.repo_dir}", summary='Applied approved filesystem cleanup'))
+        run.status = RunStatus.QUEUED
+        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.resumed', payload_json={'reason': 'approved_filesystem_cleanup', 'paths': applied_paths}))
+        db.commit()
+        threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "cleanup_applied": True, "paths": applied_paths}
 
     if proposal_items and run and env and env.container_id:
         applied_paths = []
