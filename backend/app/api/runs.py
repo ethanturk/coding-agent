@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Event, ExecutionEnvironment
+from app.api.dependencies import get_latest_env, get_run_or_404
+from app.models import Event
 from app.models.enums import EnvironmentStatus, RunStatus
 from app.schemas.run import RunCreate, RunListRead, RunRead
 from app.services.docker_runner import destroy_container
@@ -126,7 +127,7 @@ def cancel_run_route(run_id: str, db: Session = Depends(get_db)):
     run = get_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    env = db.query(ExecutionEnvironment).filter(ExecutionEnvironment.run_id == run_id).order_by(ExecutionEnvironment.created_at.desc()).first()
+    env = get_latest_env(db, run_id)
     if env and env.status != EnvironmentStatus.DESTROYED:
         destroy_container(db, env)
     run.status = RunStatus.CANCELLED
@@ -144,7 +145,7 @@ def delete_run_route(run_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Run not found")
     if run.status in {RunStatus.RUNNING, RunStatus.COMPLETED}:
         raise HTTPException(status_code=400, detail="Cannot delete a running or completed run")
-    env = db.query(ExecutionEnvironment).filter(ExecutionEnvironment.run_id == run_id).order_by(ExecutionEnvironment.created_at.desc()).first()
+    env = get_latest_env(db, run_id)
     if env and env.status != EnvironmentStatus.DESTROYED:
         destroy_container(db, env)
     db.delete(run)
