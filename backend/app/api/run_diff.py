@@ -1,11 +1,12 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Artifact, ExecutionEnvironment, Run
+from app.api.dependencies import get_run_or_404, get_latest_env
+from app.models import Artifact
 from app.services.docker_runner import git_diff_in_container, git_status_in_container
 
 router = APIRouter(prefix="/runs", tags=["run-diff"])
@@ -28,9 +29,8 @@ def _artifact_text(db: Session, run_id: str, name: str) -> str | None:
 
 @router.get("/{run_id}/diff")
 def run_diff(run_id: str, db: Session = Depends(get_db)):
-    if not db.get(Run, run_id):
-        raise HTTPException(status_code=404, detail="Run not found")
-    env = db.query(ExecutionEnvironment).filter(ExecutionEnvironment.run_id == run_id).order_by(ExecutionEnvironment.created_at.desc()).first()
+    get_run_or_404(db, run_id)
+    env = get_latest_env(db, run_id)
     if env and env.container_id:
         status = git_status_in_container(env)
         diff = git_diff_in_container(env)

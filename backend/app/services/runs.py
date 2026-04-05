@@ -1,14 +1,10 @@
-import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Event, Run, Step
 from app.models.enums import AgentRole, RunStatus, StepKind, StepStatus
 from app.schemas.run import RunCreate
-
-
-def _id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:20]}"
+from app.services.id_gen import generate_id as _id
 
 
 def create_run(db: Session, data: RunCreate) -> Run:

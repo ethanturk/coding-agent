@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Approval, Artifact, Event, ExecutionEnvironment, Run
+from app.api.dependencies import get_run_or_404, get_active_env_or_400
+from app.models import Approval, Artifact, Event
 from app.models.enums import ApprovalStatus, ApprovalType, ArtifactType
 from app.services.runs import _id
 
@@ -11,12 +12,8 @@ router = APIRouter(prefix="/runs", tags=["proposals"])
 
 @router.post("/{run_id}/propose-edit")
 def propose_edit(run_id: str, payload: dict, db: Session = Depends(get_db)):
-    run = db.get(Run, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
-    env = db.query(ExecutionEnvironment).filter(ExecutionEnvironment.run_id == run_id).order_by(ExecutionEnvironment.created_at.desc()).first()
-    if not env or not env.container_id:
-        raise HTTPException(status_code=400, detail="Run has no active container environment")
+    run = get_run_or_404(db, run_id)
+    env = get_active_env_or_400(db, run_id)
     path = payload.get('path')
     old_text = payload.get('old_text')
     new_text = payload.get('new_text')
@@ -34,7 +31,7 @@ def propose_edit(run_id: str, payload: dict, db: Session = Depends(get_db)):
         run_id=run.id,
         step_id=run.current_step_id,
         artifact_type=ArtifactType.LOG,
-        name=f'proposal-{path.replace('/', '_')}.json',
+        name=f"proposal-{path.replace('/', '_')}.json",
         storage_uri=f"container://{env.container_id}/{env.repo_dir}/{path}",
         summary='Proposed edit awaiting approval',
     )

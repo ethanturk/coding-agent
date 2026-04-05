@@ -1,15 +1,11 @@
 import subprocess
-import uuid
 from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Project
 from app.schemas.project import ProjectCreate
-
-
-def _id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:20]}"
+from app.services.id_gen import generate_id as _id
 
 
 def _materialize_repo(repo_url: str | None, local_repo_path: str) -> None:

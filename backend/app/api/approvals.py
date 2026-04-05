@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal, get_db
-from app.models import Approval, Artifact, Event, ExecutionEnvironment, Run
+from app.api.dependencies import get_latest_env
+from app.models import Approval, Artifact, Event, Run
 from app.models.enums import ApprovalStatus, ApprovalType, ArtifactType, RunStatus
 from app.services.docker_runner import edit_file_in_container, exec_in_container
 from app.services.executor import execute_run
@@ -44,7 +45,7 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Approval not found")
     approval.status = ApprovalStatus.APPROVED
     run = db.get(Run, approval.run_id)
-    env = db.query(ExecutionEnvironment).filter(ExecutionEnvironment.run_id == approval.run_id).order_by(ExecutionEnvironment.created_at.desc()).first()
+    env = get_latest_env(db, approval.run_id)
 
     proposals = (approval.requested_payload_json or {}).get('proposals') if approval.requested_payload_json else None
     single = approval.requested_payload_json if approval.requested_payload_json and 'path' in approval.requested_payload_json else None

@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 
+from app.services.developer_agent import detect_language_family
 from app.services.llm_client import llm_chat_json
 from app.services.settings import get_settings, resolve_role_model
 
@@ -19,17 +19,7 @@ def _llm_edit_schema() -> dict:
 
 
 def build_language_prompt_context(file_path: str, semantic_patch: dict) -> dict:
-    suffix = Path(file_path).suffix.lower()
-    if suffix in {'.py'}:
-        family = 'python'
-    elif suffix in {'.ts', '.tsx', '.js', '.jsx'}:
-        family = 'javascript_like'
-    elif suffix in {'.json', '.yaml', '.yml'}:
-        family = 'config'
-    elif suffix in {'.md'}:
-        family = 'markdown'
-    else:
-        family = 'generic'
+    family = detect_language_family(file_path)
     return {
         'language_family': family,
         'region_type': semantic_patch.get('target_region', {}).get('anchor', 'body'),
