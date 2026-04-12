@@ -16,6 +16,11 @@ DEFAULT_SETTINGS = {
         'reviewer': {},
         'reporter': {},
     },
+    'autonomy': {
+        'auto_approve_threshold': 0.8,
+        'max_review_iterations': 2,
+        'require_human_for_pr_merge': True,
+    },
 }
 
 

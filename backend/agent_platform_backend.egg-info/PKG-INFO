@@ -12,3 +12,4 @@ Requires-Dist: pydantic>=2.8
 Requires-Dist: pydantic-settings>=2.4
 Requires-Dist: langgraph>=0.2
 Requires-Dist: litellm>=1.51
+Requires-Dist: deepagents>=0.5

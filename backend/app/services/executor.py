@@ -1,278 +1,148 @@
-from pathlib import Path
+"""Run execution via DeepAgents orchestration.
+
+Bootstraps a Docker sandbox, builds a DeepAgents orchestrator with
+role-specific models and the Docker-backed filesystem, invokes it
+with the user's goal, and persists results as Steps/Events/Artifacts.
+Applies configurable autonomy to decide whether changes auto-apply
+or require human approval.
+"""
+
+from __future__ import annotations
+
 import json
+import logging
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.models import Approval, Artifact, Event, Project, Run, Step
-from app.models.enums import AgentRole, ApprovalStatus, ApprovalType, ArtifactType, RunStatus, StepKind, StepStatus
-from app.graph.workflow import build_graph
-from app.services.developer_agent import (
-    EDITABLE_SUFFIXES,
-    answer_simple_question,
-    build_edit_plan,
-    build_edit_proposal,
-    build_template_candidate,
-    build_search_context,
-    infer_targets_from_repo,
-    parse_goal_instructions,
-    search_terms_from_goal,
-    summarize_proposals,
+from app.models.enums import (
+    AgentRole,
+    ApprovalStatus,
+    ApprovalType,
+    ArtifactType,
+    RunStatus,
+    StepKind,
+    StepStatus,
 )
-from app.services.docker_runner import bootstrap_repo_in_container, create_container, ensure_docker_environment, exec_in_container, list_files_in_container, read_file_in_container
-from app.services.llm_edits import choose_edit_candidate, compile_llm_edit_candidate, suggest_bounded_edit, validate_bounded_candidate
-from app.services.llm_planner import enrich_edit_plan
+from app.graph.workflow import build_deep_agent, invoke_deep_agent, resume_deep_agent
+from app.services.context_manager import resolve_langchain_model
+from app.services.deepagents_fs import DockerSandbox
+from app.services.docker_runner import (
+    bootstrap_repo_in_container,
+    create_container,
+    ensure_docker_environment,
+    exec_in_container,
+)
 from app.services.runs import _id
 from app.services.settings import get_settings, resolve_role_model
 
+logger = logging.getLogger(__name__)
+
+ARTIFACT_BASE = Path("/home/ethanturk/.openclaw/workspace/coding-agent/runtime_artifacts")
+
 
 def _write_artifact_file(run_id: str, name: str, content: str) -> str:
-    base = Path('/home/ethanturk/.openclaw/workspace/coding-agent/runtime_artifacts') / run_id
+    base = ARTIFACT_BASE / run_id
     base.mkdir(parents=True, exist_ok=True)
     path = base / name
     path.write_text(content)
     return str(path)
 
 
-def _add_artifact(db: Session, run: Run, step: Step, artifact_type: ArtifactType, name: str, uri: str, summary: str) -> Artifact:
-    artifact = Artifact(id=_id('art'), run_id=run.id, step_id=step.id, artifact_type=artifact_type, name=name, storage_uri=uri, summary=summary)
+def _add_artifact(
+    db: Session,
+    run: Run,
+    step: Step,
+    artifact_type: ArtifactType,
+    name: str,
+    uri: str,
+    summary: str,
+) -> Artifact:
+    artifact = Artifact(
+        id=_id("art"),
+        run_id=run.id,
+        step_id=step.id,
+        artifact_type=artifact_type,
+        name=name,
+        storage_uri=uri,
+        summary=summary,
+    )
     db.add(artifact)
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=step.id, event_type='artifact.created', payload_json={'artifact_id': artifact.id, 'name': artifact.name}))
+    db.add(
+        Event(
+            id=_id("evt"),
+            run_id=run.id,
+            step_id=step.id,
+            event_type="artifact.created",
+            payload_json={"artifact_id": artifact.id, "name": artifact.name},
+        )
+    )
     return artifact
 
 
-def _handle_question(db: Session, run: Run) -> Run:
-    answer = answer_simple_question(run.goal)
-    answer_path = _write_artifact_file(run.id, 'answer.txt', answer)
-    db.add(Artifact(id=_id('art'), run_id=run.id, step_id=run.current_step_id, artifact_type=ArtifactType.SUMMARY, name='answer.txt', storage_uri=answer_path, summary=answer))
-    run.status = RunStatus.COMPLETED
-    run.final_summary = answer
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.completed', payload_json={'summary': answer, 'mode': 'question'}))
-    db.commit()
-    db.refresh(run)
-    return run
-
-
-def _bootstrap_sandbox(db, run, project):
+def _bootstrap_sandbox(db: Session, run: Run, project: Project):
+    """Create and initialize Docker sandbox for a run."""
     env = ensure_docker_environment(db, run, project)
     env = create_container(db, env)
     bootstrap = bootstrap_repo_in_container(db, env, project)
-    if not bootstrap.get('ok'):
-        raise ValueError(bootstrap.get('stderr') or 'Failed to bootstrap repo in container')
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='sandbox.ready', payload_json={'container_id': env.container_id, 'repo_dir': env.repo_dir, 'branch': env.branch_name}))
+    if not bootstrap.get("ok"):
+        raise ValueError(bootstrap.get("stderr") or "Failed to bootstrap repo in container")
+    db.add(
+        Event(
+            id=_id("evt"),
+            run_id=run.id,
+            step_id=run.current_step_id,
+            event_type="sandbox.ready",
+            payload_json={
+                "container_id": env.container_id,
+                "repo_dir": env.repo_dir,
+                "branch": env.branch_name,
+            },
+        )
+    )
     db.commit()
     return env
 
 
-def _gather_search_context(env, run):
-    file_listing = list_files_in_container(env, env.repo_dir)
-    repo_files = [line for line in file_listing.get('stdout', '').splitlines() if line.strip()] if file_listing.get('ok') else []
-
-    search_terms = search_terms_from_goal(run.goal)
-    grep_output = ''
-    if search_terms:
-        grep_pattern = '|'.join(search_terms)
-        grep_result = exec_in_container(env, f"cd {env.repo_dir} && grep -RniE \"{grep_pattern}\" . --exclude-dir=.git | head -200 || true")
-        grep_output = (grep_result.get('stdout') or '').strip()
-    search_context = build_search_context(run.goal, repo_files, grep_output)
-    return repo_files, search_terms, search_context
+def _resolve_models(settings: dict) -> dict:
+    """Resolve LangChain model instances for each agent role."""
+    models = {}
+    for role in ("orchestrator", "planner", "developer", "reviewer"):
+        try:
+            models[role] = resolve_langchain_model(settings, role)
+        except Exception as exc:
+            logger.warning("Failed to resolve model for role %s: %s", role, exc)
+            models[role] = None
+    return models
 
 
-def _build_planning_artifacts(db, run, step, edit_plan, llm_plan, search_context):
-    search_context_path = _write_artifact_file(run.id, 'developer-search-context.json', json.dumps(search_context, indent=2))
-    db.add(Artifact(id=_id('art'), run_id=run.id, step_id=step.id, artifact_type=ArtifactType.SUMMARY, name='developer-search-context.json', storage_uri=search_context_path, summary='Developer search context'))
+def _should_auto_approve(settings: dict, agent_result: dict) -> bool:
+    """Check if the run result meets the auto-approval threshold."""
+    autonomy = settings.get("autonomy", {})
+    threshold = float(autonomy.get("auto_approve_threshold", 0.8))
+    confidence = float(agent_result.get("confidence", 0.0))
+    review_decision = agent_result.get("review_decision")
+    blocking_issues = agent_result.get("blocking_issues", [])
 
-    edit_plan_path = _write_artifact_file(run.id, 'developer-edit-plan.json', json.dumps(edit_plan, indent=2))
-    db.add(Artifact(id=_id('art'), run_id=run.id, step_id=step.id, artifact_type=ArtifactType.SUMMARY, name='developer-edit-plan.json', storage_uri=edit_plan_path, summary='Developer edit plan'))
-
-    llm_plan_path = _write_artifact_file(run.id, 'developer-llm-plan.json', json.dumps(llm_plan, indent=2))
-    db.add(Artifact(id=_id('art'), run_id=run.id, step_id=step.id, artifact_type=ArtifactType.SUMMARY, name='developer-llm-plan.json', storage_uri=llm_plan_path, summary='Developer LLM planning output'))
-
-    return search_context_path, edit_plan_path, llm_plan_path
-
-
-def _evaluate_single_file(db, settings, run, env, proposal, plan_by_path, draft_proposals):
-    read_result = read_file_in_container(env, f"{env.repo_dir}/{proposal['path']}")
-    current_content = read_result['stdout'] if read_result.get('ok') else proposal['old_text']
-    final_proposal = build_edit_proposal(run.goal, proposal['path'], current_content, plan_by_path.get(proposal['path']), draft_proposals)
-    template_candidate = build_template_candidate(run.goal, proposal['path'], current_content, plan_by_path.get(proposal['path']))
-    llm_edit = suggest_bounded_edit(db, run.goal, proposal['path'], current_content, final_proposal['semantic_patch'])
-    llm_candidate = compile_llm_edit_candidate(proposal['path'], current_content, final_proposal['semantic_patch'], llm_edit)
-    llm_validation = validate_bounded_candidate(current_content, llm_candidate, final_proposal['semantic_patch'])
-    decision = choose_edit_candidate(settings, final_proposal, llm_candidate, llm_validation)
-
-    final_choice = final_proposal
-    template_score = 0.0
-    if template_candidate.get('validation', {}).get('ok') and template_candidate.get('changed'):
-        template_score = decision['deterministic_score'] + 0.05
-        if template_score > decision['deterministic_score'] and decision['winner'] == 'deterministic':
-            final_choice = template_candidate
-            final_choice['generator'] = 'template_deterministic'
-    if decision['winner'] == 'llm_bounded' and llm_candidate.get('ok'):
-        final_choice = dict(final_proposal)
-        final_choice['new_text'] = llm_candidate['new_text']
-        final_choice['reason'] = f"LLM bounded patch selected ({llm_candidate.get('reason')})"
-        final_choice['validation'] = llm_validation
-        final_choice['generator'] = 'llm_bounded'
-    final_choice['llm_edit'] = llm_edit
-    final_choice['candidate_decision'] = decision
-
-    comparison = {
-        'path': proposal['path'],
-        'deterministic_candidate': {'generator': 'deterministic', 'intent': final_proposal['intent'], 'validation': final_proposal.get('validation'), 'reason': final_proposal.get('reason')},
-        'template_candidate': {'generator': 'template_deterministic', 'validation': template_candidate.get('validation'), 'reason': template_candidate.get('reason')},
-        'llm_candidate': {'generator': 'llm_bounded', 'edit': llm_edit, 'compiled': llm_candidate, 'validation': llm_validation},
-        'chosen_candidate': final_choice.get('generator', decision['winner']),
-        'rejected_reason': 'policy_or_score' if decision['winner'] == 'deterministic' and decision['llm_score'] >= 0 else None,
-        'scores': {'deterministic': decision['deterministic_score'], 'template_deterministic': template_score, 'llm_bounded': decision['llm_score']},
-        'rollout_stage': decision['rollout_stage'],
-    }
-
-    return final_choice, comparison
-
-
-def _generate_proposals(db, settings, run, env, target_files, edit_plan):
-    proposed_edits: list[dict] = []
-    draft_proposals: list[dict] = []
-    candidate_comparisons: list[dict] = []
-    plan_by_path = {entry['path']: entry for entry in edit_plan['targets']}
-
-    for target_file in target_files:
-        if Path(target_file).suffix.lower() not in EDITABLE_SUFFIXES:
-            continue
-        read_result = read_file_in_container(env, f"{env.repo_dir}/{target_file}")
-        if not read_result['ok']:
-            continue
-        current_content = read_result['stdout']
-        proposal = build_edit_proposal(run.goal, target_file, current_content, plan_by_path.get(target_file))
-        draft_proposals.append(proposal)
-
-    for proposal in draft_proposals:
-        final_choice, comparison = _evaluate_single_file(db, settings, run, env, proposal, plan_by_path, draft_proposals)
-        candidate_comparisons.append(comparison)
-        if final_choice['changed']:
-            proposed_edits.append(final_choice)
-
-    return proposed_edits, candidate_comparisons
-
-
-def _save_proposal_artifacts(db, run, step, settings, instructions, proposed_edits, candidate_comparisons, edit_plan, llm_plan, artifact_paths):
-    search_context_path, edit_plan_path, llm_plan_path = artifact_paths
-    summary = summarize_proposals(proposed_edits)
-    proposal_path = _write_artifact_file(run.id, 'developer-proposals.json', json.dumps(proposed_edits, indent=2))
-    candidates_path = _write_artifact_file(run.id, 'developer-edit-candidates.json', json.dumps(candidate_comparisons, indent=2))
-    eval_harness = {
-        'task': run.goal,
-        'candidate_count': len(candidate_comparisons),
-        'llm_wins': sum(1 for item in candidate_comparisons if item['chosen_candidate'] == 'llm_bounded'),
-        'deterministic_wins': sum(1 for item in candidate_comparisons if item['chosen_candidate'] == 'deterministic'),
-        'template_wins': sum(1 for item in candidate_comparisons if item['chosen_candidate'] == 'template_deterministic'),
-        'rollout_stage': settings.get('bounded_llm', {}).get('rollout_stage', 'stage_b'),
-    }
-    eval_path = _write_artifact_file(run.id, 'developer-eval-harness.json', json.dumps(eval_harness, indent=2))
-    summary_path = _write_artifact_file(run.id, 'developer-proposal-summary.txt', f"Mode: {instructions['mode']}\nFiles: {', '.join(summary['files'])}\nSummary: {summary['summary']}\n")
-    db.add(Artifact(id=_id('art'), run_id=run.id, step_id=step.id, artifact_type=ArtifactType.SUMMARY, name='developer-proposal-summary.txt', storage_uri=summary_path, summary='Developer proposal summary'))
-    db.add(Artifact(id=_id('art'), run_id=run.id, step_id=step.id, artifact_type=ArtifactType.SUMMARY, name='developer-edit-candidates.json', storage_uri=candidates_path, summary='Deterministic vs LLM edit candidate comparison'))
-    db.add(Artifact(id=_id('art'), run_id=run.id, step_id=step.id, artifact_type=ArtifactType.SUMMARY, name='developer-eval-harness.json', storage_uri=eval_path, summary='Bounded LLM evaluation harness summary'))
-    approval = Approval(
-        id=_id('apr'),
-        run_id=run.id,
-        step_id=step.id,
-        title=f"Approve developer edits ({summary['count']} file(s))",
-        approval_type=ApprovalType.EDIT_PROPOSAL,
-        status=ApprovalStatus.PENDING,
-        requested_payload_json={
-            'proposal_file': proposal_path,
-            'plan_file': edit_plan_path,
-            'search_context_file': search_context_path,
-            'llm_plan_file': llm_plan_path,
-            'candidates_file': candidates_path,
-            'proposals': proposed_edits,
-            'summary': summary,
-            'edit_plan': edit_plan,
-            'llm_plan': llm_plan,
-        },
-    )
-    db.add(approval)
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=step.id, event_type='edit.proposed', payload_json={'files': summary['files'], 'approval_id': approval.id, 'dependency_groups': summary.get('dependency_groups', [])}))
-    return summary
-
-
-def _run_testing_step(db, run, env, project, role_models, implementation_step):
-    testing_step = Step(
-        id=_id('step'),
-        run_id=run.id,
-        sequence_index=3,
-        kind=StepKind.TESTING,
-        role=AgentRole.TESTER,
-        title='Run smoke test command',
-        status=StepStatus.RUNNING,
-        input_json={'previous_step_id': implementation_step.id, 'model': role_models['tester']},
-    )
-    db.add(testing_step)
-    db.flush()
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=testing_step.id, event_type='step.started', payload_json={'title': testing_step.title}))
-    test_command = project.test_command or 'git status --short || true'
-    test_result = exec_in_container(env, f"cd {env.repo_dir} && {test_command}")
-    testing_step.output_json = test_result
-    testing_step.status = StepStatus.COMPLETED if test_result['ok'] else StepStatus.FAILED
-    testing_step.error_summary = None if test_result['ok'] else test_result['stderr']
-    test_log = _write_artifact_file(run.id, 'test.log', (test_result.get('stdout') or '') + '\n' + (test_result.get('stderr') or ''))
-    _add_artifact(db, run, testing_step, ArtifactType.TEST_REPORT, 'test.log', test_log, 'Tester command output')
-    return testing_step, test_result
-
-
-def _run_review_step(db, run, env, inspect_result, test_result, role_models, graph_result):
-    review_step = Step(
-        id=_id('step'),
-        run_id=run.id,
-        sequence_index=4,
-        kind=StepKind.REVIEW,
-        role=AgentRole.REVIEWER,
-        title='Review run outcome',
-        status=StepStatus.COMPLETED,
-        input_json={'tests': graph_result.get('tests'), 'model': role_models['reviewer']},
-        output_json={
-            'approved': inspect_result['ok'] and test_result['ok'],
-            'notes': 'Run completed successfully' if inspect_result['ok'] and test_result['ok'] else 'Run needs attention',
-        },
-    )
-    db.add(review_step)
-    db.flush()
-
-    if not (inspect_result['ok'] and test_result['ok']):
-        approval = Approval(
-            id=_id('apr'),
-            run_id=run.id,
-            step_id=review_step.id,
-            title='Review failed run',
-            approval_type=ApprovalType.GOVERNANCE,
-            status=ApprovalStatus.PENDING,
-            requested_payload_json={
-                'implementation_ok': inspect_result['ok'],
-                'tests_ok': test_result['ok'],
-            },
-        )
-        db.add(approval)
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=review_step.id, event_type='approval.requested', payload_json={'approval_id': approval.id}))
-        run.status = RunStatus.WAITING_FOR_HUMAN
-    else:
-        run.status = RunStatus.COMPLETED
-
-    diff_result = exec_in_container(env, f"cd {env.repo_dir} && git diff -- .")
-    diff_path = _write_artifact_file(run.id, 'git.diff', diff_result.get('stdout') or diff_result.get('stderr') or '')
-    _add_artifact(db, run, review_step, ArtifactType.DIFF, 'git.diff', diff_path, 'Current repository diff')
-
-    summary_text = review_step.output_json['notes']
-    summary_path = _write_artifact_file(run.id, 'final-summary.txt', summary_text)
-    _add_artifact(db, run, review_step, ArtifactType.SUMMARY, 'final-summary.txt', summary_path, summary_text)
-
-    run.current_step_id = review_step.id
-    run.final_summary = summary_text
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=review_step.id, event_type='run.completed' if run.status == RunStatus.COMPLETED else 'run.blocked', payload_json={'summary': run.final_summary}))
-    return review_step
+    if blocking_issues:
+        return False
+    if review_decision == "request_changes":
+        return False
+    return confidence >= threshold
 
 
 def execute_run(db: Session, run_id: str) -> Run | None:
+    """Execute a run using the DeepAgents orchestrator.
+
+    Flow:
+        1. Bootstrap Docker sandbox
+        2. Resolve role-specific LangChain models from settings
+        3. Build DeepAgents orchestrator with Docker sandbox backend
+        4. Invoke orchestrator with the user's goal
+        5. Persist results as Steps/Events/Artifacts
+        6. Apply autonomy logic (auto-approve or create approval)
+    """
     run = db.get(Run, run_id)
     if not run:
         return None
@@ -281,115 +151,367 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         return None
 
     settings = get_settings(db).value_json
-    role_models = {role: resolve_role_model(settings, role) for role in ['orchestrator', 'planner', 'developer', 'tester', 'reviewer', 'reporter']}
-    llm_transport = {
-        'orchestrator': 'litellm',
-        'planner': 'litellm',
-        'developer': 'litellm_responses' if (role_models.get('developer') or {}).get('model') == 'gpt-5.3-codex' else 'legacy_http',
-        'tester': 'litellm',
-        'reviewer': 'legacy_http',
-        'reporter': 'litellm',
+    role_model_configs = {
+        role: resolve_role_model(settings, role)
+        for role in ("orchestrator", "planner", "developer", "reviewer", "tester", "reporter")
     }
 
     run.status = RunStatus.RUNNING
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.started', payload_json={'goal': run.goal, 'role_models': role_models, 'llm_transport': llm_transport}))
+    db.add(
+        Event(
+            id=_id("evt"),
+            run_id=run.id,
+            step_id=run.current_step_id,
+            event_type="run.started",
+            payload_json={
+                "goal": run.goal,
+                "role_models": role_model_configs,
+                "engine": "deepagents",
+            },
+        )
+    )
     db.commit()
 
-    instructions = parse_goal_instructions(run.goal)
-    if instructions['task_type'] == 'question':
-        return _handle_question(db, run)
+    # --- Step 1: Bootstrap sandbox ---
+    try:
+        env = _bootstrap_sandbox(db, run, project)
+    except Exception as exc:
+        run.status = RunStatus.FAILED
+        run.final_summary = f"Sandbox bootstrap failed: {exc}"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=run.current_step_id,
+                event_type="run.failed",
+                payload_json={"error": str(exc), "phase": "sandbox_bootstrap"},
+            )
+        )
+        db.commit()
+        db.refresh(run)
+        return run
 
-    env = _bootstrap_sandbox(db, run, project)
+    # --- Step 2: Resolve models ---
+    models = _resolve_models(settings)
+    orchestrator_model = models.get("orchestrator")
+    if not orchestrator_model:
+        run.status = RunStatus.FAILED
+        run.final_summary = "No orchestrator model configured"
+        db.commit()
+        db.refresh(run)
+        return run
 
-    graph = build_graph()
-    graph_result = graph.invoke({'run_id': run.id, 'goal': run.goal, 'status': 'queued'})
-
+    # --- Step 3: Create planning step and build agent ---
     planning_step = db.get(Step, run.current_step_id)
     if planning_step:
-        planning_step.status = StepStatus.COMPLETED
-        planning_step.output_json = graph_result.get('plan')
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=planning_step.id, event_type='step.completed', payload_json={'title': planning_step.title}))
+        planning_step.status = StepStatus.RUNNING
+        planning_step.title = "DeepAgents orchestration"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=planning_step.id,
+                event_type="step.started",
+                payload_json={"title": "DeepAgents orchestration", "engine": "deepagents"},
+            )
+        )
+        db.commit()
 
+    sandbox = DockerSandbox.from_env(env)
+
+    project_context_parts = []
+    if project.test_command:
+        project_context_parts.append(f"Test command: `{project.test_command}`")
+    if project.inspect_command:
+        project_context_parts.append(f"Inspect command: `{project.inspect_command}`")
+    if env.repo_dir:
+        project_context_parts.append(f"Repository is cloned at: {env.repo_dir}")
+    if env.branch_name:
+        project_context_parts.append(f"Working branch: {env.branch_name}")
+
+    # Enable HITL interrupts when autonomy threshold is 1.0 (always require human)
+    autonomy = settings.get("autonomy", {})
+    enable_hitl = float(autonomy.get("auto_approve_threshold", 0.8)) >= 1.0
+
+    try:
+        agent, checkpointer, thread_id = build_deep_agent(
+            orchestrator_model=orchestrator_model,
+            planner_model=models.get("planner"),
+            developer_model=models.get("developer"),
+            reviewer_model=models.get("reviewer"),
+            backend=sandbox,
+            project_context="\n".join(project_context_parts),
+            enable_hitl=enable_hitl,
+        )
+    except Exception as exc:
+        run.status = RunStatus.FAILED
+        run.final_summary = f"Failed to build DeepAgents orchestrator: {exc}"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=run.current_step_id,
+                event_type="run.failed",
+                payload_json={"error": str(exc), "phase": "agent_build"},
+            )
+        )
+        db.commit()
+        db.refresh(run)
+        return run
+
+    # --- Step 4: Invoke orchestrator ---
     implementation_step = Step(
-        id=_id('step'),
+        id=_id("step"),
         run_id=run.id,
         sequence_index=2,
         kind=StepKind.IMPLEMENTATION,
         role=AgentRole.DEVELOPER,
-        title='Inspect project workspace',
+        title="DeepAgents implementation",
         status=StepStatus.RUNNING,
-        input_json={'plan': graph_result.get('plan'), 'model': role_models['developer']},
+        input_json={
+            "goal": run.goal,
+            "models": {k: str(v) for k, v in role_model_configs.items()},
+        },
     )
     db.add(implementation_step)
     db.flush()
-    db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='step.started', payload_json={'title': implementation_step.title}))
-    inspect_result = exec_in_container(env, f"cd {env.repo_dir} && {project.inspect_command or 'pwd && ls -la'}")
-    implementation_output = dict(inspect_result)
+    db.add(
+        Event(
+            id=_id("evt"),
+            run_id=run.id,
+            step_id=implementation_step.id,
+            event_type="step.started",
+            payload_json={"title": "DeepAgents implementation"},
+        )
+    )
+    db.commit()
 
-    repo_files, search_terms, search_context = _gather_search_context(env, run)
-
-    target_files = instructions['targets']
-    if not target_files:
-        target_files = infer_targets_from_repo(run.goal, repo_files + search_context.get('related_files', []))
-
-    edit_plan = build_edit_plan(run.goal, target_files, search_context)
-    llm_plan = enrich_edit_plan(db, run.goal, search_context, edit_plan)
-    if llm_plan.get('used'):
-        edit_plan['llm_summary'] = llm_plan['content'].get('summary')
-        edit_plan['llm_notes'] = llm_plan['content'].get('notes', [])
-        edit_plan['llm_risks'] = llm_plan['content'].get('risks', [])
-
-    implementation_output['repo_file_count'] = len(repo_files)
-    implementation_output['target_files'] = target_files
-    implementation_output['search_terms'] = search_terms
-    implementation_output['search_context'] = search_context
-    implementation_output['edit_plan'] = edit_plan
-    implementation_output['llm_plan'] = llm_plan
-
-    artifact_paths = _build_planning_artifacts(db, run, implementation_step, edit_plan, llm_plan, search_context)
-
-    proposed_edits: list[dict] = []
-    candidate_comparisons: list[dict] = []
-    if inspect_result['ok'] and target_files:
-        proposed_edits, candidate_comparisons = _generate_proposals(db, settings, run, env, target_files, edit_plan)
-
-        if proposed_edits:
-            summary = _save_proposal_artifacts(db, run, implementation_step, settings, instructions, proposed_edits, candidate_comparisons, edit_plan, llm_plan, artifact_paths)
-            implementation_output['proposal_summary'] = summary
-
-    implementation_step.output_json = implementation_output
-    implementation_step.status = StepStatus.COMPLETED if inspect_result['ok'] else StepStatus.FAILED
-    implementation_step.error_summary = None if inspect_result['ok'] else inspect_result['stderr']
-    impl_log = _write_artifact_file(run.id, 'implementation.log', (inspect_result.get('stdout') or '') + '\n' + (inspect_result.get('stderr') or ''))
-    _add_artifact(db, run, implementation_step, ArtifactType.LOG, 'implementation.log', impl_log, 'Developer command output')
-
-    if proposed_edits:
-        run.current_step_id = implementation_step.id
-        run.status = RunStatus.WAITING_FOR_HUMAN
-        run.final_summary = f"Developer proposed edits for {len(proposed_edits)} file(s)"
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='run.blocked', payload_json={'reason': 'developer_edit_approval_required', 'files': [p['path'] for p in proposed_edits], 'plan': edit_plan}))
+    try:
+        agent_result = invoke_deep_agent(
+            agent,
+            goal=run.goal,
+            test_command=project.test_command,
+            inspect_command=project.inspect_command,
+            thread_id=thread_id if enable_hitl else None,
+        )
+    except Exception as exc:
+        logger.exception("DeepAgents invocation failed for run %s", run_id)
+        implementation_step.status = StepStatus.FAILED
+        implementation_step.error_summary = str(exc)[:500]
+        run.status = RunStatus.FAILED
+        run.final_summary = f"DeepAgents execution failed: {str(exc)[:300]}"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=implementation_step.id,
+                event_type="run.failed",
+                payload_json={"error": str(exc)[:500], "phase": "agent_invocation"},
+            )
+        )
         db.commit()
         db.refresh(run)
         return run
 
-    if inspect_result['ok'] and not target_files:
+    # --- Step 4b: Handle HITL interrupt ---
+    if agent_result.get("status") == "interrupted":
+        pending = agent_result.get("pending_tool_calls", [])
         implementation_step.status = StepStatus.BLOCKED
         implementation_step.output_json = {
-            'reason': 'No actionable file targets found in goal',
-            'hint': 'Use file:<path> and a concrete instruction like append/replace/set',
-            'search_context': search_context,
+            "interrupted": True,
+            "pending_tool_calls": pending,
+            "thread_id": thread_id,
         }
-        run.current_step_id = implementation_step.id
+        approval = Approval(
+            id=_id("apr"),
+            run_id=run.id,
+            step_id=implementation_step.id,
+            title=f"Approve file operations ({len(pending)} pending)",
+            approval_type=ApprovalType.EDIT_PROPOSAL,
+            status=ApprovalStatus.PENDING,
+            requested_payload_json={
+                "pending_tool_calls": pending,
+                "thread_id": thread_id,
+                "hitl": True,
+            },
+        )
+        db.add(approval)
         run.status = RunStatus.WAITING_FOR_HUMAN
-        run.final_summary = 'No actionable proposal generated from goal'
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='run.blocked', payload_json={'reason': 'no_actionable_goal', 'search_context': search_context}))
+        run.current_step_id = implementation_step.id
+        run.final_summary = f"Awaiting approval for {len(pending)} file operation(s)"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=implementation_step.id,
+                event_type="run.blocked",
+                payload_json={
+                    "reason": "hitl_interrupt",
+                    "pending_tool_calls": pending,
+                    "approval_id": approval.id,
+                },
+            )
+        )
         db.commit()
         db.refresh(run)
         return run
 
-    _, test_result = _run_testing_step(db, run, env, project, role_models, implementation_step)
-    _run_review_step(db, run, env, inspect_result, test_result, role_models, graph_result)
+    # --- Step 5: Persist results ---
+    implementation_step.output_json = agent_result
+    implementation_step.status = (
+        StepStatus.COMPLETED
+        if agent_result.get("status") != "failed"
+        else StepStatus.FAILED
+    )
+    implementation_step.error_summary = (
+        "; ".join(agent_result.get("blocking_issues", []))[:500]
+        if agent_result.get("blocking_issues")
+        else None
+    )
 
+    # Save orchestrator result as artifact
+    result_path = _write_artifact_file(
+        run.id,
+        "deepagents-result.json",
+        json.dumps(agent_result, indent=2, default=str),
+    )
+    _add_artifact(
+        db,
+        run,
+        implementation_step,
+        ArtifactType.SUMMARY,
+        "deepagents-result.json",
+        result_path,
+        f"DeepAgents orchestration result (confidence: {agent_result.get('confidence', 'N/A')})",
+    )
+
+    # Save git diff as artifact
+    diff_result = exec_in_container(env, f"cd {env.repo_dir} && git diff -- .")
+    diff_content = diff_result.get("stdout") or diff_result.get("stderr") or ""
+    if diff_content.strip():
+        diff_path = _write_artifact_file(run.id, "git.diff", diff_content)
+        _add_artifact(
+            db, run, implementation_step, ArtifactType.DIFF, "git.diff", diff_path,
+            "Repository diff after DeepAgents execution",
+        )
+
+    # Save plan summary if available
+    if agent_result.get("plan_summary"):
+        plan_path = _write_artifact_file(
+            run.id, "plan-summary.txt", agent_result["plan_summary"]
+        )
+        _add_artifact(
+            db, run, implementation_step, ArtifactType.SUMMARY, "plan-summary.txt",
+            plan_path, "Plan summary from DeepAgents orchestrator",
+        )
+
+    # --- Step 6: Review step ---
+    review_step = Step(
+        id=_id("step"),
+        run_id=run.id,
+        sequence_index=3,
+        kind=StepKind.REVIEW,
+        role=AgentRole.REVIEWER,
+        title="DeepAgents review",
+        status=StepStatus.COMPLETED,
+        input_json={"agent_result_status": agent_result.get("status")},
+        output_json={
+            "decision": agent_result.get("review_decision", "none"),
+            "confidence": agent_result.get("confidence", 0.0),
+            "summary": agent_result.get("review_summary", ""),
+            "blocking_issues": agent_result.get("blocking_issues", []),
+        },
+    )
+    db.add(review_step)
+    db.flush()
+
+    # --- Step 7: Autonomy routing ---
+    files_changed = agent_result.get("files_changed", [])
+    auto_approve = _should_auto_approve(settings, agent_result)
+
+    if agent_result.get("status") == "failed":
+        # Agent reported failure
+        run.status = RunStatus.FAILED
+        run.final_summary = agent_result.get("review_summary") or "DeepAgents execution failed"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=review_step.id,
+                event_type="run.failed",
+                payload_json={"reason": "agent_failure", "result": agent_result},
+            )
+        )
+    elif not files_changed and not diff_content.strip():
+        # No changes made
+        run.status = RunStatus.COMPLETED
+        run.final_summary = agent_result.get("plan_summary") or "No file changes needed"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=review_step.id,
+                event_type="run.completed",
+                payload_json={"reason": "no_changes", "result": agent_result},
+            )
+        )
+    elif auto_approve:
+        # High confidence + reviewer approved → auto-complete
+        run.status = RunStatus.COMPLETED
+        run.final_summary = (
+            f"Auto-approved: {len(files_changed)} file(s) changed "
+            f"(confidence: {agent_result.get('confidence', 0.0):.0%})"
+        )
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=review_step.id,
+                event_type="run.completed",
+                payload_json={
+                    "reason": "auto_approved",
+                    "confidence": agent_result.get("confidence"),
+                    "files_changed": files_changed,
+                },
+            )
+        )
+    else:
+        # Below threshold or reviewer requested changes → human approval
+        approval = Approval(
+            id=_id("apr"),
+            run_id=run.id,
+            step_id=review_step.id,
+            title=f"Review DeepAgents changes ({len(files_changed)} file(s))",
+            approval_type=ApprovalType.EDIT_PROPOSAL,
+            status=ApprovalStatus.PENDING,
+            requested_payload_json={
+                "agent_result": agent_result,
+                "diff": diff_content[:50000],
+                "files_changed": files_changed,
+            },
+        )
+        db.add(approval)
+        run.status = RunStatus.WAITING_FOR_HUMAN
+        run.final_summary = (
+            f"Awaiting human review: {len(files_changed)} file(s) changed "
+            f"(confidence: {agent_result.get('confidence', 0.0):.0%})"
+        )
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=review_step.id,
+                event_type="run.blocked",
+                payload_json={
+                    "reason": "human_review_required",
+                    "confidence": agent_result.get("confidence"),
+                    "blocking_issues": agent_result.get("blocking_issues", []),
+                    "approval_id": approval.id,
+                },
+            )
+        )
+
+    run.current_step_id = review_step.id
     db.commit()
     db.refresh(run)
     return run

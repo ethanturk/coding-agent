@@ -83,6 +83,51 @@ export function SettingsEditor({ initial }: { initial: any }) {
           />
         </div>
       ))}
+
+      <h2 className="section-title">Autonomy</h2>
+      <div className="card">
+        <label style={{ display: 'block', marginBottom: 8 }}>
+          <span style={{ fontWeight: 700 }}>Auto-approve threshold</span>
+          <span style={{ marginLeft: 8, opacity: 0.7 }}>
+            {((settings.autonomy?.auto_approve_threshold ?? 0.8) * 100).toFixed(0)}%
+          </span>
+        </label>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="5"
+          value={(settings.autonomy?.auto_approve_threshold ?? 0.8) * 100}
+          onChange={(e) => patch(['autonomy', 'auto_approve_threshold'], Number(e.target.value) / 100)}
+          style={{ width: '100%' }}
+        />
+        <p style={{ fontSize: '0.85em', opacity: 0.7, marginTop: 4 }}>
+          Changes with confidence above this threshold auto-apply. Set to 100% to always require human approval.
+        </p>
+      </div>
+      <div className="card">
+        <label style={{ display: 'block', marginBottom: 8 }}>
+          <span style={{ fontWeight: 700 }}>Max review iterations</span>
+        </label>
+        <input
+          type="number"
+          min="0"
+          max="5"
+          value={settings.autonomy?.max_review_iterations ?? 2}
+          onChange={(e) => patch(['autonomy', 'max_review_iterations'], Number(e.target.value))}
+          style={{ width: 80 }}
+        />
+      </div>
+      <div className="card">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={settings.autonomy?.require_human_for_pr_merge ?? true}
+            onChange={(e) => patch(['autonomy', 'require_human_for_pr_merge'], e.target.checked)}
+          />
+          <span style={{ fontWeight: 700 }}>Require human approval for PR merge</span>
+        </label>
+      </div>
     </div>
   );
 }
