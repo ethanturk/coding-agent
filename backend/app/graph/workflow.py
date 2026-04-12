@@ -5,16 +5,21 @@ that uses subagent delegation for planning, implementation, and review.
 The orchestrator receives a user goal and project context, decomposes
 the work via the planner subagent, delegates implementation to developer
 subagents, and sends results through a reviewer subagent.
+
+Supports LangGraph human-in-the-loop interrupts on file write operations
+so that edits can be reviewed before being applied.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any
 
 from deepagents import SubAgent, create_deep_agent
 from langchain_core.language_models import BaseChatModel
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
 from app.graph.agents.developer import DEVELOPER_SUBAGENT
@@ -102,7 +107,8 @@ def build_deep_agent(
     reviewer_model: BaseChatModel | None = None,
     backend: DockerSandbox | None = None,
     project_context: str = "",
-) -> CompiledStateGraph:
+    enable_hitl: bool = False,
+) -> tuple[CompiledStateGraph, MemorySaver | None, str]:
     """Build a DeepAgents orchestrator with role-specific models.
 
     Args:
@@ -112,9 +118,10 @@ def build_deep_agent(
         reviewer_model: Model for code review. Defaults to orchestrator_model.
         backend: Docker sandbox backend for file operations and execution.
         project_context: Additional context about the project (test commands, etc.)
+        enable_hitl: Enable human-in-the-loop interrupts on file write operations.
 
     Returns:
-        A compiled DeepAgents graph ready to invoke.
+        Tuple of (compiled agent graph, checkpointer or None, thread_id).
     """
     planner = _apply_model_to_subagent(PLANNER_SUBAGENT, planner_model or orchestrator_model)
     developer = _apply_model_to_subagent(DEVELOPER_SUBAGENT, developer_model or orchestrator_model)
@@ -124,14 +131,28 @@ def build_deep_agent(
     if project_context:
         system_prompt += f"\n\n## Project Context\n{project_context}"
 
+    checkpointer = None
+    interrupt_on = None
+    thread_id = str(uuid.uuid4())
+
+    if enable_hitl:
+        checkpointer = MemorySaver()
+        # Interrupt before file modifications in subagents
+        interrupt_on = {
+            "edit_file": True,
+            "write_file": True,
+        }
+
     agent = create_deep_agent(
         model=orchestrator_model,
         system_prompt=system_prompt,
         subagents=[planner, developer, reviewer],
         backend=backend,
         name="coding-orchestrator",
+        checkpointer=checkpointer,
+        interrupt_on=interrupt_on,
     )
-    return agent
+    return agent, checkpointer, thread_id
 
 
 def invoke_deep_agent(
@@ -139,6 +160,7 @@ def invoke_deep_agent(
     goal: str,
     test_command: str | None = None,
     inspect_command: str | None = None,
+    thread_id: str | None = None,
 ) -> dict[str, Any]:
     """Invoke the DeepAgents orchestrator with a coding goal.
 
@@ -147,9 +169,12 @@ def invoke_deep_agent(
         goal: The user's coding goal/request.
         test_command: Optional shell command to run tests.
         inspect_command: Optional shell command to inspect the workspace.
+        thread_id: Thread ID for checkpointed execution. Required if HITL is enabled.
 
     Returns:
         Dict with status, files_changed, confidence, review info, etc.
+        If HITL is enabled and the graph is interrupted, returns status="interrupted"
+        with pending_tool_calls containing the paused operations.
     """
     task_description = f"Goal: {goal}"
     if test_command:
@@ -157,11 +182,113 @@ def invoke_deep_agent(
     if inspect_command:
         task_description += f"\n\nInspect command: `{inspect_command}`"
 
+    config = {}
+    if thread_id:
+        config["configurable"] = {"thread_id": thread_id}
+
     result = agent.invoke(
         {"messages": [{"role": "user", "content": task_description}]},
+        config=config if config else None,
     )
 
-    # Extract the final message from the orchestrator
+    # Check if the graph was interrupted (HITL)
+    if _is_interrupted(agent, thread_id):
+        pending = _extract_pending_tool_calls(agent, thread_id)
+        return {
+            "status": "interrupted",
+            "confidence": 0.0,
+            "plan_summary": "",
+            "files_changed": [],
+            "test_results": None,
+            "review_decision": None,
+            "review_summary": "",
+            "blocking_issues": [],
+            "notes": ["Graph interrupted for human approval"],
+            "pending_tool_calls": pending,
+            "thread_id": thread_id,
+        }
+
+    return _parse_agent_result(result)
+
+
+def resume_deep_agent(
+    agent: CompiledStateGraph,
+    thread_id: str,
+    approve: bool = True,
+) -> dict[str, Any]:
+    """Resume a previously interrupted agent execution.
+
+    Args:
+        agent: The compiled DeepAgents graph.
+        thread_id: Thread ID from the interrupted execution.
+        approve: Whether to approve the pending tool calls.
+
+    Returns:
+        Dict with the final result after resumption.
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+
+    if approve:
+        # Resume with no state changes — let the pending tool calls proceed
+        result = agent.invoke(None, config=config)
+    else:
+        # Cancel: inject a rejection message
+        from langchain_core.messages import HumanMessage
+        result = agent.invoke(
+            {"messages": [HumanMessage(content="The proposed edits were rejected by the reviewer. Please stop and report the current state.")]},
+            config=config,
+        )
+
+    if _is_interrupted(agent, thread_id):
+        pending = _extract_pending_tool_calls(agent, thread_id)
+        return {
+            "status": "interrupted",
+            "confidence": 0.0,
+            "pending_tool_calls": pending,
+            "thread_id": thread_id,
+            **{k: [] for k in ("files_changed", "blocking_issues", "notes")},
+            **{k: None for k in ("test_results", "review_decision")},
+            **{k: "" for k in ("plan_summary", "review_summary")},
+        }
+
+    return _parse_agent_result(result)
+
+
+def _is_interrupted(agent: CompiledStateGraph, thread_id: str | None) -> bool:
+    """Check if the graph execution is in an interrupted state."""
+    if not thread_id:
+        return False
+    try:
+        state = agent.get_state({"configurable": {"thread_id": thread_id}})
+        return bool(state and state.next)
+    except Exception:
+        return False
+
+
+def _extract_pending_tool_calls(agent: CompiledStateGraph, thread_id: str) -> list[dict]:
+    """Extract pending tool calls from an interrupted graph state."""
+    try:
+        state = agent.get_state({"configurable": {"thread_id": thread_id}})
+        if not state or not state.values:
+            return []
+        messages = state.values.get("messages", [])
+        pending = []
+        for msg in reversed(messages):
+            tool_calls = getattr(msg, "tool_calls", None)
+            if tool_calls:
+                for tc in tool_calls:
+                    pending.append({
+                        "tool": tc.get("name", "unknown"),
+                        "args": tc.get("args", {}),
+                    })
+                break
+        return pending
+    except Exception:
+        return []
+
+
+def _parse_agent_result(result: dict) -> dict[str, Any]:
+    """Parse the final result from a DeepAgents invocation."""
     messages = result.get("messages", [])
     if not messages:
         return {

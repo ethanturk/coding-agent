@@ -25,7 +25,7 @@ from app.models.enums import (
     StepKind,
     StepStatus,
 )
-from app.graph.workflow import build_deep_agent, invoke_deep_agent
+from app.graph.workflow import build_deep_agent, invoke_deep_agent, resume_deep_agent
 from app.services.context_manager import resolve_langchain_model
 from app.services.deepagents_fs import DockerSandbox
 from app.services.docker_runner import (
@@ -217,7 +217,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         )
         db.commit()
 
-    sandbox = DockerSandbox(env)
+    sandbox = DockerSandbox.from_env(env)
 
     project_context_parts = []
     if project.test_command:
@@ -229,14 +229,19 @@ def execute_run(db: Session, run_id: str) -> Run | None:
     if env.branch_name:
         project_context_parts.append(f"Working branch: {env.branch_name}")
 
+    # Enable HITL interrupts when autonomy threshold is 1.0 (always require human)
+    autonomy = settings.get("autonomy", {})
+    enable_hitl = float(autonomy.get("auto_approve_threshold", 0.8)) >= 1.0
+
     try:
-        agent = build_deep_agent(
+        agent, checkpointer, thread_id = build_deep_agent(
             orchestrator_model=orchestrator_model,
             planner_model=models.get("planner"),
             developer_model=models.get("developer"),
             reviewer_model=models.get("reviewer"),
             backend=sandbox,
             project_context="\n".join(project_context_parts),
+            enable_hitl=enable_hitl,
         )
     except Exception as exc:
         run.status = RunStatus.FAILED
@@ -287,6 +292,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             goal=run.goal,
             test_command=project.test_command,
             inspect_command=project.inspect_command,
+            thread_id=thread_id if enable_hitl else None,
         )
     except Exception as exc:
         logger.exception("DeepAgents invocation failed for run %s", run_id)
@@ -301,6 +307,49 @@ def execute_run(db: Session, run_id: str) -> Run | None:
                 step_id=implementation_step.id,
                 event_type="run.failed",
                 payload_json={"error": str(exc)[:500], "phase": "agent_invocation"},
+            )
+        )
+        db.commit()
+        db.refresh(run)
+        return run
+
+    # --- Step 4b: Handle HITL interrupt ---
+    if agent_result.get("status") == "interrupted":
+        pending = agent_result.get("pending_tool_calls", [])
+        implementation_step.status = StepStatus.BLOCKED
+        implementation_step.output_json = {
+            "interrupted": True,
+            "pending_tool_calls": pending,
+            "thread_id": thread_id,
+        }
+        approval = Approval(
+            id=_id("apr"),
+            run_id=run.id,
+            step_id=implementation_step.id,
+            title=f"Approve file operations ({len(pending)} pending)",
+            approval_type=ApprovalType.EDIT_PROPOSAL,
+            status=ApprovalStatus.PENDING,
+            requested_payload_json={
+                "pending_tool_calls": pending,
+                "thread_id": thread_id,
+                "hitl": True,
+            },
+        )
+        db.add(approval)
+        run.status = RunStatus.WAITING_FOR_HUMAN
+        run.current_step_id = implementation_step.id
+        run.final_summary = f"Awaiting approval for {len(pending)} file operation(s)"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=implementation_step.id,
+                event_type="run.blocked",
+                payload_json={
+                    "reason": "hitl_interrupt",
+                    "pending_tool_calls": pending,
+                    "approval_id": approval.id,
+                },
             )
         )
         db.commit()
