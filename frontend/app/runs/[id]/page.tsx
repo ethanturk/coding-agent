@@ -97,7 +97,15 @@ async function openPullRequestAction(formData: FormData) {
   'use server';
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
   const runId = String(formData.get('run_id'));
-  await fetch(`${base}/api/runs/${runId}/pull-request`, { method: 'POST' });
+  const res = await fetch(`${base}/api/runs/${runId}/pull-request`, { method: 'POST' });
+  if (!res.ok) {
+    let detail = 'Failed to open pull request';
+    try {
+      const body = await res.json();
+      if (body.detail) detail = body.detail;
+    } catch {}
+    redirect(`/runs/${runId}?error=${encodeURIComponent(detail)}`);
+  }
   redirect(`/runs/${runId}`);
 }
 
@@ -105,7 +113,15 @@ async function refreshPullRequestAction(formData: FormData) {
   'use server';
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
   const runId = String(formData.get('run_id'));
-  await fetch(`${base}/api/runs/${runId}/pull-request/refresh`, { method: 'POST' });
+  const res = await fetch(`${base}/api/runs/${runId}/pull-request/refresh`, { method: 'POST' });
+  if (!res.ok) {
+    let detail = 'Failed to refresh pull request';
+    try {
+      const body = await res.json();
+      if (body.detail) detail = body.detail;
+    } catch {}
+    redirect(`/runs/${runId}?error=${encodeURIComponent(detail)}`);
+  }
   redirect(`/runs/${runId}`);
 }
 
@@ -113,7 +129,15 @@ async function mergePullRequestAction(formData: FormData) {
   'use server';
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
   const runId = String(formData.get('run_id'));
-  await fetch(`${base}/api/runs/${runId}/pull-request/merge`, { method: 'POST' });
+  const res = await fetch(`${base}/api/runs/${runId}/pull-request/merge`, { method: 'POST' });
+  if (!res.ok) {
+    let detail = 'Failed to merge pull request';
+    try {
+      const body = await res.json();
+      if (body.detail) detail = body.detail;
+    } catch {}
+    redirect(`/runs/${runId}?error=${encodeURIComponent(detail)}`);
+  }
   redirect(`/runs/${runId}`);
 }
 
@@ -122,10 +146,10 @@ export default async function RunDetail({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ launchError?: string }>;
+  searchParams: Promise<{ launchError?: string; error?: string }>;
 }) {
   const { id } = await params;
-  const { launchError } = await searchParams;
+  const { launchError, error } = await searchParams;
   const [run, events, artifacts, approvals, runDiff, environment] = await Promise.all([
     getRun(id),
     getEvents(id),
@@ -151,6 +175,7 @@ export default async function RunDetail({
         <h1 className="page-title">{run.title}</h1>
         <p className="page-subtitle">{run.goal}</p>
         {launchError ? <p className="page-subtitle" style={{ color: 'var(--warning)' }}>{decodeURIComponent(launchError)}</p> : null}
+        {error ? <p className="page-subtitle" style={{ color: 'var(--warning)' }}>{decodeURIComponent(error)}</p> : null}
         <div className="inline-actions">
           <span className={`badge ${run.status}`}>{run.status}</span>
           <RunStageBadge stage={operatorSummary?.stage} />
