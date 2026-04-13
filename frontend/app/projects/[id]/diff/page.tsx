@@ -1,13 +1,8 @@
-async function getDiff(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/projects/${id}/diff`, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
-}
+import { fetchApi } from '../../../../lib/api';
 
 export default async function ProjectDiffPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const diff = await getDiff(id);
+  const diff = await fetchApi(`/api/projects/${id}/diff`, null);
   return (
     <main style={{ padding: 24, fontFamily: 'sans-serif' }}>
       <h1>Project Diff</h1>

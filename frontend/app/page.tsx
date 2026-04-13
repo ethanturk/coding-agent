@@ -1,23 +1,14 @@
-async function getProjects() {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/projects`, { cache: 'no-store' });
-  if (!res.ok) return [];
-  return res.json();
-}
-
-async function getRuns() {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs`, { cache: 'no-store' });
-  if (!res.ok) return [];
-  return res.json();
-}
+import { fetchApi } from '../lib/api';
 
 function statusClass(status: string) {
   return `badge ${status}`;
 }
 
 export default async function Home() {
-  const [projects, runs] = await Promise.all([getProjects(), getRuns()]);
+  const [projects, runs] = await Promise.all([
+    fetchApi('/api/projects', []),
+    fetchApi('/api/runs', []),
+  ]);
   const running = runs.filter((r: any) => r.status === 'running').length;
   const blocked = runs.filter((r: any) => r.status === 'waiting_for_human').length;
 

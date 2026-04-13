@@ -1,9 +1,4 @@
-async function getRunDiff(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs/${id}/diff`, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
-}
+import { fetchApi } from '../../../../lib/api';
 
 export default async function RunDiffPage({
   params,
@@ -14,7 +9,7 @@ export default async function RunDiffPage({
 }) {
   const { id } = await params;
   const { file } = await searchParams;
-  const data = await getRunDiff(id);
+  const data = await fetchApi(`/api/runs/${id}/diff`, null);
   const changedFiles = data?.changed_files || [];
   const filteredFiles = file
     ? changedFiles.filter((line: string) => line.includes(file))
