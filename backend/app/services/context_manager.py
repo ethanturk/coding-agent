@@ -29,11 +29,35 @@ DEFAULT_CONTEXT_WINDOW = 128_000
 COMPRESSION_THRESHOLD = 0.85  # trigger compression at 85% of window
 
 
+class _NullContentSanitizer(ChatOpenAI):
+    """ChatOpenAI subclass that replaces null content with empty strings.
+
+    Many OpenAI-compatible servers (LM Studio, llama.cpp, etc.) use Jinja
+    templates that crash on null message content. The OpenAI API produces
+    null content on tool-call assistant messages, which is valid per the
+    spec but breaks these servers. This subclass patches it.
+    """
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        for msg in messages:
+            if msg.content is None:
+                msg.content = ""
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        for msg in messages:
+            if msg.content is None:
+                msg.content = ""
+        return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+
 def resolve_langchain_model(settings: dict, role: str) -> BaseChatModel:
     """Convert platform provider settings for a role into a LangChain model.
 
     Supports: openai, openai_compatible, z_ai_coding providers.
     All are OpenAI-compatible and use ChatOpenAI with appropriate base_url.
+    Uses _NullContentSanitizer for compatible providers that may choke on
+    null content in tool-call messages.
     """
     role_cfg = resolve_role_model(settings, role) or {}
     provider = role_cfg.get("provider") or settings.get("default", {}).get("provider") or "openai"
@@ -44,7 +68,10 @@ def resolve_langchain_model(settings: dict, role: str) -> BaseChatModel:
         cfg = providers.get("openai", {})
         api_key = cfg.get("api_key") or ""
         base_url = cfg.get("base_url") or "https://api.openai.com/v1"
-        return ChatOpenAI(
+        # Use sanitizer if pointing to a non-OpenAI base URL
+        is_native_openai = "api.openai.com" in base_url
+        cls = ChatOpenAI if is_native_openai else _NullContentSanitizer
+        return cls(
             model=model,
             api_key=api_key,
             base_url=base_url.rstrip("/"),
@@ -55,7 +82,7 @@ def resolve_langchain_model(settings: dict, role: str) -> BaseChatModel:
         api_key = cfg.get("api_key") or ""
         base_url = (cfg.get("base_url") or "").rstrip("/")
         effective_model = model or cfg.get("model") or ""
-        return ChatOpenAI(
+        return _NullContentSanitizer(
             model=effective_model,
             api_key=api_key,
             base_url=base_url,
