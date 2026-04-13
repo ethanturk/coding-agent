@@ -29,26 +29,27 @@ DEFAULT_CONTEXT_WINDOW = 128_000
 COMPRESSION_THRESHOLD = 0.85  # trigger compression at 85% of window
 
 
-class _NullContentSanitizer(ChatOpenAI):
-    """ChatOpenAI subclass that replaces null content with empty strings.
+def _sanitize_null_content(payload: dict) -> dict:
+    """Replace null content with empty strings in the serialized API payload.
 
     Many OpenAI-compatible servers (LM Studio, llama.cpp, etc.) use Jinja
-    templates that crash on null message content. The OpenAI API produces
-    null content on tool-call assistant messages, which is valid per the
-    spec but breaks these servers. This subclass patches it.
+    templates that crash on null message content. The OpenAI API spec allows
+    null content on tool-call assistant messages, but these servers can't
+    handle it. Patching at the payload level (after LangChain serialization)
+    ensures nothing slips through.
     """
+    for msg in payload.get("messages", []):
+        if msg.get("content") is None:
+            msg["content"] = ""
+    return payload
 
-    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-        for msg in messages:
-            if msg.content is None:
-                msg.content = ""
-        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
-    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
-        for msg in messages:
-            if msg.content is None:
-                msg.content = ""
-        return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+class _NullContentSanitizer(ChatOpenAI):
+    """ChatOpenAI that patches null content in the final API payload."""
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        return _sanitize_null_content(payload)
 
 
 def resolve_langchain_model(settings: dict, role: str) -> BaseChatModel:
