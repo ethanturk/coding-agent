@@ -33,9 +33,12 @@ def get_github_token() -> str | None:
         for line in cred.stdout.splitlines():
             if line.startswith('password='):
                 return line.split('=', 1)[1].strip() or None
-    gh = subprocess.run(['gh', 'auth', 'token'], capture_output=True, text=True)
-    if gh.returncode == 0 and gh.stdout.strip():
-        return gh.stdout.strip()
+    try:
+        gh = subprocess.run(['gh', 'auth', 'token'], capture_output=True, text=True)
+        if gh.returncode == 0 and gh.stdout.strip():
+            return gh.stdout.strip()
+    except FileNotFoundError:
+        pass
     return None
 
 

@@ -1,17 +1,30 @@
-import json
-import subprocess
+import logging
 from urllib.parse import urlparse
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.models import PullRequest, Run
 from app.models.enums import PullRequestStatus
+from app.services.docker_runner import get_github_token
 from app.services.runs import _id
+
+logger = logging.getLogger(__name__)
+
+GITHUB_API = "https://api.github.com"
 
 
 def repo_slug(repo_url: str) -> str:
     path = urlparse(repo_url).path.strip('/')
     return path.removesuffix('.git')
+
+
+def _github_headers() -> dict[str, str]:
+    token = get_github_token()
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def create_pull_request_record(db: Session, run: Run, repo: str, branch: str) -> PullRequest:
@@ -29,68 +42,100 @@ def create_pull_request_record(db: Session, run: Run, repo: str, branch: str) ->
     return pr
 
 
-def dry_run_pr_create(repo: str, branch: str, base: str, title: str, body: str) -> dict:
-    result = subprocess.run([
-        'gh', 'pr', 'create', '--repo', repo, '--head', branch, '--base', base,
-        '--title', title, '--body', body, '--dry-run'
-    ], capture_output=True, text=True)
-    return {
-        'ok': result.returncode == 0,
-        'stdout': result.stdout,
-        'stderr': result.stderr,
-        'returncode': result.returncode,
-    }
-
-
 def create_pull_request(repo: str, branch: str, base: str, title: str, body: str) -> dict:
-    result = subprocess.run([
-        'gh', 'pr', 'create', '--repo', repo, '--head', branch, '--base', base,
-        '--title', title, '--body', body
-    ], capture_output=True, text=True)
-    url = result.stdout.strip().splitlines()[-1] if result.returncode == 0 and result.stdout.strip() else None
-    pr_number = None
-    if url and '/pull/' in url:
-        try:
-            pr_number = int(url.rstrip('/').split('/pull/')[-1])
-        except Exception:
-            pr_number = None
-    payload = {'url': url, 'number': pr_number, 'state': 'OPEN' if url else None}
-    return {
-        'ok': result.returncode == 0,
-        'stdout': result.stdout,
-        'stderr': result.stderr,
-        'returncode': result.returncode,
-        'payload': payload,
+    """Create a pull request using the GitHub REST API."""
+    headers = _github_headers()
+    url = f"{GITHUB_API}/repos/{repo}/pulls"
+    payload = {
+        "title": title,
+        "body": body,
+        "head": branch,
+        "base": base,
     }
+    try:
+        resp = httpx.post(url, json=payload, headers=headers, timeout=30)
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            return {
+                'ok': True,
+                'payload': {
+                    'url': data.get('html_url'),
+                    'number': data.get('number'),
+                    'state': data.get('state', '').upper(),
+                },
+                'stderr': '',
+            }
+        else:
+            error_msg = resp.text[:500]
+            logger.warning("GitHub PR create failed (%d): %s", resp.status_code, error_msg)
+            return {
+                'ok': False,
+                'stderr': f"GitHub API error ({resp.status_code}): {error_msg}",
+                'payload': {},
+            }
+    except httpx.HTTPError as exc:
+        return {
+            'ok': False,
+            'stderr': f"HTTP error: {exc}",
+            'payload': {},
+        }
 
 
 def fetch_pull_request(repo: str, pr_number: int) -> dict:
-    result = subprocess.run([
-        'gh', 'pr', 'view', str(pr_number), '--repo', repo,
-        '--json', 'number,url,state,title,headRefName,baseRefName,mergeCommit,reviewDecision,isDraft'
-    ], capture_output=True, text=True)
-    payload = None
-    if result.returncode == 0 and result.stdout.strip():
-        try:
-            payload = json.loads(result.stdout)
-        except Exception:
-            payload = None
-    return {
-        'ok': result.returncode == 0,
-        'stdout': result.stdout,
-        'stderr': result.stderr,
-        'returncode': result.returncode,
-        'payload': payload,
-    }
+    """Fetch pull request details using the GitHub REST API."""
+    headers = _github_headers()
+    url = f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}"
+    try:
+        resp = httpx.get(url, headers=headers, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            merge_commit = None
+            if data.get('merge_commit_sha'):
+                merge_commit = {'oid': data['merge_commit_sha']}
+            return {
+                'ok': True,
+                'payload': {
+                    'number': data.get('number'),
+                    'url': data.get('html_url'),
+                    'state': data.get('state', '').upper(),
+                    'title': data.get('title'),
+                    'headRefName': data.get('head', {}).get('ref'),
+                    'baseRefName': data.get('base', {}).get('ref'),
+                    'mergeCommit': merge_commit,
+                    'isDraft': data.get('draft', False),
+                    'reviewDecision': None,  # Not directly available via REST
+                },
+                'stderr': '',
+            }
+        else:
+            return {
+                'ok': False,
+                'stderr': f"GitHub API error ({resp.status_code}): {resp.text[:500]}",
+                'payload': None,
+            }
+    except httpx.HTTPError as exc:
+        return {
+            'ok': False,
+            'stderr': f"HTTP error: {exc}",
+            'payload': None,
+        }
 
 
 def merge_pull_request(repo: str, pr_number: int) -> dict:
-    result = subprocess.run([
-        'gh', 'pr', 'merge', str(pr_number), '--repo', repo, '--merge', '--delete-branch'
-    ], capture_output=True, text=True)
-    return {
-        'ok': result.returncode == 0,
-        'stdout': result.stdout,
-        'stderr': result.stderr,
-        'returncode': result.returncode,
-    }
+    """Merge a pull request using the GitHub REST API."""
+    headers = _github_headers()
+    url = f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}/merge"
+    try:
+        resp = httpx.put(url, json={"merge_method": "merge"}, headers=headers, timeout=30)
+        if resp.status_code == 200:
+            return {'ok': True, 'stderr': ''}
+        else:
+            return {
+                'ok': False,
+                'stderr': f"GitHub API error ({resp.status_code}): {resp.text[:500]}",
+            }
+    except httpx.HTTPError as exc:
+        return {
+            'ok': False,
+            'stderr': f"HTTP error: {exc}",
+        }
