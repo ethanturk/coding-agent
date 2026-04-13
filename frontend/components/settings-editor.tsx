@@ -7,7 +7,18 @@ import { ProviderModelSelector } from './provider-model-selector';
 const providers = ['openai', 'openai_compatible', 'z_ai_coding'];
 
 export function SettingsEditor({ initial }: { initial: any }) {
-  const [settings, setSettings] = useState(initial);
+  const fallback = {
+    default: { provider: '', model: '' },
+    providers: {
+      openai: { api_key: '', base_url: '', organization: '', project: '', models: [] },
+      openai_compatible: { api_key: '', base_url: '', models: [] },
+      z_ai_coding: { api_key: '', base_url: '', models: [] },
+    },
+    prompting: { max_prompt_length: 1000 },
+    roles: {},
+    autonomy: { auto_approve_threshold: 0.8, max_review_iterations: 2, require_human_for_pr_merge: true },
+  };
+  const [settings, setSettings] = useState(initial ?? fallback);
   const [status, setStatus] = useState('saved');
 
   useEffect(() => {
