@@ -10,53 +10,12 @@ import { RunStageBadge } from '../../../components/run-stage-badge';
 import { RunTimeline } from '../../../components/run-timeline';
 import { StepDetail } from '../../../components/step-detail';
 import { ValidationSummaryCard } from '../../../components/validation-summary-card';
+import { fetchApi } from '../../../lib/api';
 
 function asStringList(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((item) => String(item));
   if (typeof value === 'string' && value.trim()) return [value];
   return [];
-}
-
-async function getRun(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs/${id}`, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-async function getEvents(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs/${id}/events`, { cache: 'no-store' });
-  if (!res.ok) return [];
-  return res.json();
-}
-
-async function getArtifacts(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs/${id}/artifacts`, { cache: 'no-store' });
-  if (!res.ok) return [];
-  return res.json();
-}
-
-async function getApprovals(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/approvals/run/${id}`, { cache: 'no-store' });
-  if (!res.ok) return [];
-  return res.json();
-}
-
-async function getRunDiff(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs/${id}/diff`, { cache: 'no-store' });
-  if (!res.ok) return { changed_files: [] };
-  return res.json();
-}
-
-async function getEnvironment(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs/${id}/environment/meta`, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
 }
 
 async function readArtifactJson(artifacts: any[], name: string) {
@@ -151,12 +110,12 @@ export default async function RunDetail({
   const { id } = await params;
   const { launchError, error } = await searchParams;
   const [run, events, artifacts, approvals, runDiff, environment] = await Promise.all([
-    getRun(id),
-    getEvents(id),
-    getArtifacts(id),
-    getApprovals(id),
-    getRunDiff(id),
-    getEnvironment(id),
+    fetchApi(`/api/runs/${id}`, null),
+    fetchApi(`/api/runs/${id}/events`, []),
+    fetchApi(`/api/runs/${id}/artifacts`, []),
+    fetchApi(`/api/approvals/run/${id}`, []),
+    fetchApi(`/api/runs/${id}/diff`, { changed_files: [] }),
+    fetchApi(`/api/runs/${id}/environment/meta`, null),
   ]);
   if (!run) return <main style={{ padding: 24 }}>Run not found</main>;
 

@@ -1,8 +1,7 @@
+import { fetchApi } from '../../../../lib/api';
+
 async function getFiles(id: string) {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs/${id}/files`, { cache: 'no-store' });
-  if (!res.ok) return { files: [] };
-  return res.json();
+  return fetchApi(`/api/runs/${id}/files`, { files: [] });
 }
 
 async function applyEdit(formData: FormData) {

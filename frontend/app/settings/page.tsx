@@ -1,13 +1,8 @@
+import { fetchApi } from '../../lib/api';
 import { SettingsEditor } from '../../components/settings-editor';
 
-async function getSettings() {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/settings`, { cache: 'no-store' });
-  return res.ok ? res.json() : null;
-}
-
 export default async function SettingsPage() {
-  const settings = await getSettings();
+  const settings = await fetchApi('/api/settings', null);
   return (
     <main className="grid">
       <section className="card">

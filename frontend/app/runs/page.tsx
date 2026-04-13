@@ -1,12 +1,7 @@
-async function getRuns() {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
-  const res = await fetch(`${base}/api/runs`, { cache: 'no-store' });
-  if (!res.ok) return [];
-  return res.json();
-}
+import { fetchApi } from '../../lib/api';
 
 export default async function RunsPage() {
-  const runs = await getRuns();
+  const runs = await fetchApi('/api/runs', []);
   return (
     <main className="grid">
       <div>
