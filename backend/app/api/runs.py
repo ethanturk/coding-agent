@@ -27,6 +27,8 @@ def _serialize_run_list_item(db: Session, run):
 
 
 def _record_run_failure(db: Session, run, error: Exception | str):
+    db.rollback()
+    run = get_run(db, run.id) or run
     message = str(error)
     run.status = RunStatus.FAILED
     run.final_summary = message
