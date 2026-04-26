@@ -63,6 +63,16 @@ def classify_changed_files(files_changed: list[Any]) -> list[str]:
     return normalized
 
 
+def extract_approved_plan(approval_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    payload = approval_payload or {}
+    if payload.get('kind') != 'plan':
+        return None
+    plan = payload.get('plan')
+    if not isinstance(plan, dict):
+        return None
+    return plan
+
+
 def scope_guard_decision(*, planned_files: list[str], changed_files: list[str], scope_control: dict[str, Any]) -> dict[str, Any]:
     planned = [path for path in planned_files if path]
     changed = [path for path in changed_files if path]

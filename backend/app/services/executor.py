@@ -30,13 +30,14 @@ from app.services.approval_flow import (
     build_plan_approval_payload,
     build_review_approval_payload,
     classify_changed_files,
+    extract_approved_plan,
     get_scope_control,
     scope_guard_decision,
     should_interrupt_before_write,
 )
 from app.services.context_manager import resolve_langchain_model
 from app.services.deepagents_fs import DockerSandbox
-from app.services.planning import build_initial_plan, collect_repo_files, enrich_plan_if_possible
+from app.services.planning import build_initial_plan, collect_repo_files, enrich_plan_if_possible, serialize_plan
 from app.services.docker_runner import (
     bootstrap_repo_in_container,
     create_container,
@@ -49,15 +50,6 @@ from app.services.settings import get_settings, resolve_role_model
 logger = logging.getLogger(__name__)
 
 ARTIFACT_BASE = Path("/home/ethanturk/.openclaw/workspace/coding-agent/runtime_artifacts")
-
-
-def _find_pending_plan_approval(db: Session, run_id: str) -> Approval | None:
-    return (
-        db.query(Approval)
-        .filter(Approval.run_id == run_id, Approval.status == ApprovalStatus.APPROVED)
-        .order_by(Approval.created_at.desc())
-        .first()
-    )
 
 
 def _write_artifact_file(run_id: str, name: str, content: str) -> str:
@@ -162,6 +154,32 @@ def _build_plan_for_run(db: Session, env, goal: str) -> tuple[dict, dict]:
     return enriched['plan'], enriched.get('enrichment') or {'used': False, 'reason': 'not_available'}
 
 
+def _implementation_project_context(project: Project, env, scope_control: dict, approved_plan: dict | None) -> str:
+    project_context_parts = []
+    if project.test_command:
+        project_context_parts.append(f"Test command: `{project.test_command}`")
+    if project.inspect_command:
+        project_context_parts.append(f"Inspect command: `{project.inspect_command}`")
+    if env.repo_dir:
+        project_context_parts.append(f"Repository is cloned at: {env.repo_dir}")
+    if env.branch_name:
+        project_context_parts.append(f"Working branch: {env.branch_name}")
+    project_context_parts.append(
+        "Scope controls: "
+        f"require_plan_approval={scope_control['require_plan_approval']}, "
+        f"interrupt_before_write={scope_control['interrupt_before_write']}, "
+        f"max_files_changed={scope_control['max_files_changed']}, "
+        f"max_parallel_developer_tasks={scope_control['max_parallel_developer_tasks']}, "
+        f"allow_path_expansion={scope_control['allow_path_expansion']}"
+    )
+    if approved_plan:
+        project_context_parts.append("Approved plan JSON:\n" + serialize_plan(approved_plan))
+        approved_targets = [target.get('path') for target in approved_plan.get('targets', []) if target.get('path')]
+        if approved_targets:
+            project_context_parts.append('Approved target files: ' + ', '.join(approved_targets))
+    return "\n".join(project_context_parts)
+
+
 def execute_run(db: Session, run_id: str) -> Run | None:
     """Execute a run using the DeepAgents orchestrator.
 
@@ -250,25 +268,6 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         db.commit()
 
     sandbox = DockerSandbox.from_env(env)
-
-    project_context_parts = []
-    if project.test_command:
-        project_context_parts.append(f"Test command: `{project.test_command}`")
-    if project.inspect_command:
-        project_context_parts.append(f"Inspect command: `{project.inspect_command}`")
-    if env.repo_dir:
-        project_context_parts.append(f"Repository is cloned at: {env.repo_dir}")
-    if env.branch_name:
-        project_context_parts.append(f"Working branch: {env.branch_name}")
-    project_context_parts.append(
-        "Scope controls: "
-        f"require_plan_approval={scope_control['require_plan_approval']}, "
-        f"interrupt_before_write={scope_control['interrupt_before_write']}, "
-        f"max_files_changed={scope_control['max_files_changed']}, "
-        f"max_parallel_developer_tasks={scope_control['max_parallel_developer_tasks']}, "
-        f"allow_path_expansion={scope_control['allow_path_expansion']}"
-    )
-
     enable_hitl = should_interrupt_before_write(settings)
 
     try:
@@ -278,7 +277,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             developer_model=models.get("developer"),
             reviewer_model=models.get("reviewer"),
             backend=sandbox,
-            project_context="\n".join(project_context_parts),
+            project_context=_implementation_project_context(project, env, scope_control, approved_plan),
             enable_hitl=enable_hitl,
         )
     except Exception as exc:
@@ -309,7 +308,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             .order_by(Approval.created_at.desc())
             .first()
         )
-        approved_plan = (
+        approved_plan_row = (
             db.query(Approval)
             .filter(
                 Approval.run_id == run.id,
@@ -319,10 +318,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             .order_by(Approval.created_at.desc())
             .first()
         )
-        if approved_plan and (approved_plan.requested_payload_json or {}).get('kind') == 'plan':
-            approved_plan = approved_plan.requested_payload_json.get('plan')
-        else:
-            approved_plan = None
+        approved_plan = extract_approved_plan(approved_plan_row.requested_payload_json if approved_plan_row else None)
 
         if not approved_plan:
             plan, plan_enrichment = _build_plan_for_run(db, env, run.goal)
@@ -411,10 +407,19 @@ def execute_run(db: Session, run_id: str) -> Run | None:
     )
     db.commit()
 
+    implementation_goal = run.goal
+    if approved_plan and approved_plan.get('targets'):
+        approved_targets = [target for target in approved_plan.get('targets', []) if target.get('path')]
+        implementation_goal = (
+            f"{run.goal}\n\n"
+            "Only implement the approved plan below. Do not modify files outside these targets unless a human explicitly approves it.\n"
+            f"Approved plan:\n{serialize_plan({'summary': approved_plan.get('summary'), 'targets': approved_targets, 'risks': approved_plan.get('risks', []), 'notes': approved_plan.get('notes', [])})}"
+        )
+
     try:
         agent_result = invoke_deep_agent(
             agent,
-            goal=run.goal,
+            goal=implementation_goal,
             test_command=project.test_command,
             inspect_command=project.inspect_command,
             thread_id=thread_id if enable_hitl else None,

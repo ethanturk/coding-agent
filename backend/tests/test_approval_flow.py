@@ -3,6 +3,7 @@ from app.services.approval_flow import (
     build_plan_approval_payload,
     build_review_approval_payload,
     classify_changed_files,
+    extract_approved_plan,
     get_scope_control,
     scope_guard_decision,
     should_interrupt_before_write,
@@ -96,3 +97,13 @@ def test_build_review_approval_payload_includes_scope_guard_reason():
     assert payload['kind'] == 'review'
     assert payload['summary']['reason'] == 'file_budget_exceeded'
     assert payload['files_changed'] == ['a.py', 'b.py']
+
+
+def test_extract_approved_plan_returns_only_plan_payloads():
+    plan_payload = build_plan_approval_payload(
+        {'summary': 'Only touch api.py', 'targets': [{'path': 'api.py'}], 'risks': []},
+        get_scope_control({}),
+    )
+
+    assert extract_approved_plan(plan_payload)['targets'][0]['path'] == 'api.py'
+    assert extract_approved_plan({'kind': 'review'}) is None
