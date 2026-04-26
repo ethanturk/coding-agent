@@ -89,7 +89,12 @@ class Approval(Base):
         nullable=False,
         default=ApprovalType.GOVERNANCE,
     )
-    status: Mapped[ApprovalStatus] = mapped_column(Enum(ApprovalStatus, name="approval_status"), index=True, nullable=False, default=ApprovalStatus.PENDING)
+    status: Mapped[ApprovalStatus] = mapped_column(
+        Enum(ApprovalStatus, name="approval_status", values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        index=True,
+        nullable=False,
+        default=ApprovalStatus.PENDING,
+    )
     requested_payload_json: Mapped[dict | None] = mapped_column(JSONB)
     response_payload_json: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
