@@ -26,6 +26,14 @@ from app.models.enums import (
     StepStatus,
 )
 from app.graph.workflow import build_deep_agent, invoke_deep_agent, resume_deep_agent
+from app.services.approval_flow import (
+    build_plan_approval_payload,
+    build_review_approval_payload,
+    classify_changed_files,
+    get_scope_control,
+    scope_guard_decision,
+    should_interrupt_before_write,
+)
 from app.services.context_manager import resolve_langchain_model
 from app.services.deepagents_fs import DockerSandbox
 from app.services.docker_runner import (
@@ -117,7 +125,7 @@ def _resolve_models(settings: dict) -> dict:
     return models
 
 
-def _should_auto_approve(settings: dict, agent_result: dict) -> bool:
+def _should_auto_approve(settings: dict, agent_result: dict, *, scope_guard: dict | None = None) -> bool:
     """Check if the run result meets the auto-approval threshold."""
     autonomy = settings.get("autonomy", {})
     threshold = float(autonomy.get("auto_approve_threshold", 0.8))
@@ -128,6 +136,8 @@ def _should_auto_approve(settings: dict, agent_result: dict) -> bool:
     if blocking_issues:
         return False
     if review_decision == "request_changes":
+        return False
+    if (scope_guard or {}).get("requires_human_review"):
         return False
     return confidence >= threshold
 
@@ -155,6 +165,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         role: resolve_role_model(settings, role)
         for role in ("orchestrator", "planner", "developer", "reviewer", "tester", "reporter")
     }
+    scope_control = get_scope_control(settings)
 
     run.status = RunStatus.RUNNING
     db.add(
@@ -228,10 +239,16 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         project_context_parts.append(f"Repository is cloned at: {env.repo_dir}")
     if env.branch_name:
         project_context_parts.append(f"Working branch: {env.branch_name}")
+    project_context_parts.append(
+        "Scope controls: "
+        f"require_plan_approval={scope_control['require_plan_approval']}, "
+        f"interrupt_before_write={scope_control['interrupt_before_write']}, "
+        f"max_files_changed={scope_control['max_files_changed']}, "
+        f"max_parallel_developer_tasks={scope_control['max_parallel_developer_tasks']}, "
+        f"allow_path_expansion={scope_control['allow_path_expansion']}"
+    )
 
-    # Enable HITL interrupts when autonomy threshold is 1.0 (always require human)
-    autonomy = settings.get("autonomy", {})
-    enable_hitl = float(autonomy.get("auto_approve_threshold", 0.8)) >= 1.0
+    enable_hitl = should_interrupt_before_write(settings)
 
     try:
         agent, checkpointer, thread_id = build_deep_agent(
@@ -259,6 +276,55 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         db.refresh(run)
         return run
 
+    if scope_control.get("require_plan_approval"):
+        plan_step = Step(
+            id=_id("step"),
+            run_id=run.id,
+            sequence_index=2,
+            kind=StepKind.REVIEW,
+            role=AgentRole.PLANNER,
+            title="Approve implementation plan",
+            status=StepStatus.BLOCKED,
+            input_json={"goal": run.goal, "scope_control": scope_control},
+            output_json={
+                "summary": "Plan approval required before implementation.",
+                "targets": [],
+                "risks": [],
+            },
+        )
+        db.add(plan_step)
+        db.flush()
+        plan_payload = build_plan_approval_payload(plan_step.output_json or {}, scope_control)
+        approval = Approval(
+            id=_id("apr"),
+            run_id=run.id,
+            step_id=plan_step.id,
+            title="Approve implementation plan",
+            approval_type=ApprovalType.GOVERNANCE,
+            status=ApprovalStatus.PENDING,
+            requested_payload_json=plan_payload,
+        )
+        db.add(approval)
+        run.status = RunStatus.WAITING_FOR_HUMAN
+        run.current_step_id = plan_step.id
+        run.final_summary = "Awaiting plan approval before implementation"
+        db.add(
+            Event(
+                id=_id("evt"),
+                run_id=run.id,
+                step_id=plan_step.id,
+                event_type="run.blocked",
+                payload_json={
+                    "reason": "plan_approval_required",
+                    "approval_id": approval.id,
+                    "scope_control": scope_control,
+                },
+            )
+        )
+        db.commit()
+        db.refresh(run)
+        return run
+
     # --- Step 4: Invoke orchestrator ---
     implementation_step = Step(
         id=_id("step"),
@@ -271,6 +337,8 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         input_json={
             "goal": run.goal,
             "models": {k: str(v) for k, v in role_model_configs.items()},
+            "planned_files": [],
+            "scope_control": scope_control,
         },
     )
     db.add(implementation_step)
@@ -426,8 +494,14 @@ def execute_run(db: Session, run_id: str) -> Run | None:
     db.flush()
 
     # --- Step 7: Autonomy routing ---
-    files_changed = agent_result.get("files_changed", [])
-    auto_approve = _should_auto_approve(settings, agent_result)
+    files_changed = classify_changed_files(agent_result.get("files_changed", []))
+    planned_files = classify_changed_files((implementation_step.input_json or {}).get("planned_files", []))
+    scope_guard = scope_guard_decision(
+        planned_files=planned_files,
+        changed_files=files_changed,
+        scope_control=scope_control,
+    )
+    auto_approve = _should_auto_approve(settings, agent_result, scope_guard=scope_guard)
 
     if agent_result.get("status") == "failed":
         # Agent reported failure
@@ -472,6 +546,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
                     "reason": "auto_approved",
                     "confidence": agent_result.get("confidence"),
                     "files_changed": files_changed,
+                    "scope_guard": scope_guard,
                 },
             )
         )
@@ -482,13 +557,15 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             run_id=run.id,
             step_id=review_step.id,
             title=f"Review DeepAgents changes ({len(files_changed)} file(s))",
-            approval_type=ApprovalType.EDIT_PROPOSAL,
+            approval_type=ApprovalType.GOVERNANCE,
             status=ApprovalStatus.PENDING,
-            requested_payload_json={
-                "agent_result": agent_result,
-                "diff": diff_content[:50000],
-                "files_changed": files_changed,
-            },
+            requested_payload_json=build_review_approval_payload(
+                agent_result=agent_result,
+                diff=diff_content,
+                files_changed=files_changed,
+                scope_guard=scope_guard,
+                scope_control=scope_control,
+            ),
         )
         db.add(approval)
         run.status = RunStatus.WAITING_FOR_HUMAN
@@ -507,6 +584,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
                     "confidence": agent_result.get("confidence"),
                     "blocking_issues": agent_result.get("blocking_issues", []),
                     "approval_id": approval.id,
+                    "scope_guard": scope_guard,
                 },
             )
         )

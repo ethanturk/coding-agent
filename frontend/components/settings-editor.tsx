@@ -16,7 +16,18 @@ export function SettingsEditor({ initial }: { initial: any }) {
     },
     prompting: { max_prompt_length: 1000 },
     roles: {},
-    autonomy: { auto_approve_threshold: 0.8, max_review_iterations: 2, require_human_for_pr_merge: true },
+    autonomy: {
+      auto_approve_threshold: 0.8,
+      max_review_iterations: 2,
+      require_human_for_pr_merge: true,
+      scope_control: {
+        require_plan_approval: true,
+        interrupt_before_write: true,
+        max_files_changed: 3,
+        max_parallel_developer_tasks: 1,
+        allow_path_expansion: false,
+      },
+    },
   };
   const [settings, setSettings] = useState(initial ?? fallback);
   const [status, setStatus] = useState('saved');
@@ -113,7 +124,7 @@ export function SettingsEditor({ initial }: { initial: any }) {
           style={{ width: '100%' }}
         />
         <p style={{ fontSize: '0.85em', opacity: 0.7, marginTop: 4 }}>
-          Changes with confidence above this threshold auto-apply. Set to 100% to always require human approval.
+          Changes with confidence above this threshold auto-apply, but scope guardrails can still force human review.
         </p>
       </div>
       <div className="card">
@@ -138,6 +149,56 @@ export function SettingsEditor({ initial }: { initial: any }) {
           />
           <span style={{ fontWeight: 700 }}>Require human approval for PR merge</span>
         </label>
+      </div>
+
+      <h2 className="section-title">Scope Control</h2>
+      <div className="card">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={settings.autonomy?.scope_control?.require_plan_approval ?? true}
+            onChange={(e) => patch(['autonomy', 'scope_control', 'require_plan_approval'], e.target.checked)}
+          />
+          <span style={{ fontWeight: 700 }}>Require plan approval before implementation</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={settings.autonomy?.scope_control?.interrupt_before_write ?? true}
+            onChange={(e) => patch(['autonomy', 'scope_control', 'interrupt_before_write'], e.target.checked)}
+          />
+          <span style={{ fontWeight: 700 }}>Interrupt before write operations</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={settings.autonomy?.scope_control?.allow_path_expansion ?? false}
+            onChange={(e) => patch(['autonomy', 'scope_control', 'allow_path_expansion'], e.target.checked)}
+          />
+          <span style={{ fontWeight: 700 }}>Allow unplanned file expansion</span>
+        </label>
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, minmax(140px, 220px))' }}>
+          <label>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Max files changed</div>
+            <input
+              type="number"
+              min="1"
+              max="50"
+              value={settings.autonomy?.scope_control?.max_files_changed ?? 3}
+              onChange={(e) => patch(['autonomy', 'scope_control', 'max_files_changed'], Number(e.target.value || 3))}
+            />
+          </label>
+          <label>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Max parallel developer tasks</div>
+            <input
+              type="number"
+              min="1"
+              max="10"
+              value={settings.autonomy?.scope_control?.max_parallel_developer_tasks ?? 1}
+              onChange={(e) => patch(['autonomy', 'scope_control', 'max_parallel_developer_tasks'], Number(e.target.value || 1))}
+            />
+          </label>
+        </div>
       </div>
     </div>
   );

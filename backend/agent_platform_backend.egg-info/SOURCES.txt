@@ -6,3 +6,5 @@ agent_platform_backend.egg-info/dependency_links.txt
 agent_platform_backend.egg-info/requires.txt
 agent_platform_backend.egg-info/top_level.txt
 app/main.py
+tests/test_approval_flow.py
+tests/test_executor_scope_controls.py

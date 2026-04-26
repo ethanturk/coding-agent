@@ -45,8 +45,8 @@ implementation, and review through specialized subagents.
    - The specific file path and what to change
    - The rationale and any dependencies
    - The relevant section of the plan
-   Launch independent file changes in parallel using multiple task tool calls
-   in a single message.
+   - A reminder that edits must stay within the approved plan targets
+   By default, work one file at a time unless project context explicitly allows parallel developer tasks.
 
 3. **Test** — After implementation, use `execute` to run the project's test
    command if one was provided.
@@ -87,7 +87,8 @@ Your final message must be a JSON object:
 ## Rules
 
 - Always plan before implementing. Don't skip the planner.
-- Launch independent developer tasks in parallel.
+- Stay within the approved target files unless project context explicitly expands scope.
+- Prefer serial developer execution. Only launch parallel developer tasks when the project context explicitly says it is allowed.
 - Always run tests if a test command is available.
 - Always review after implementation.
 - If anything fails, report clearly — don't hide errors.

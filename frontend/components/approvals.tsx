@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 
-function approvalTypeLabel(type?: string) {
+function approvalTypeLabel(type?: string, kind?: string) {
+  if (kind === 'plan') return 'Plan Approval';
+  if (kind === 'review') return 'Review Approval';
   if (type === 'edit_proposal') return 'Edit Proposal Approval';
   if (type === 'pr_merge') return 'PR Merge Approval';
   if (type === 'governance') return 'Governance Approval';
@@ -28,15 +30,36 @@ export function Approvals({ approvals, runId }: { approvals: any[]; runId: strin
           return (
             <li key={approval.id}>
               <div>
-                <strong>{approvalTypeLabel(approval.approval_type)}</strong>: {approval.title} — {approval.status}
+                <strong>{approvalTypeLabel(approval.approval_type, approval.requested_payload_json?.kind)}</strong>: {approval.title} — {approval.status}
               </div>
               {approval.requested_payload_json?.summary ? (
                 <div style={{ color: 'var(--muted)', marginTop: 6 }}>
-                  {approval.requested_payload_json.summary.summary}
+                  {approval.requested_payload_json.summary.text || approval.requested_payload_json.summary.summary}
                   {approval.requested_payload_json.summary.files?.length ? ` — ${approval.requested_payload_json.summary.files.join(', ')}` : ''}
                 </div>
               ) : null}
-              {isCleanup ? (
+              {approval.requested_payload_json?.kind === 'plan' ? (
+                <div style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 10, padding: 10 }}>
+                  <div><strong>Planned targets</strong></div>
+                  <ul>
+                    {(approval.requested_payload_json.plan?.targets || []).map((target: any) => (
+                      <li key={target.path}>
+                        <strong>{target.path}</strong> — {target.action}: {target.description}
+                      </li>
+                    ))}
+                  </ul>
+                  {approval.requested_payload_json.plan?.risks?.length ? (
+                    <>
+                      <div><strong>Risks</strong></div>
+                      <ul>
+                        {approval.requested_payload_json.plan.risks.map((risk: string) => <li key={risk}>{risk}</li>)}
+                      </ul>
+                    </>
+                  ) : null}
+                  <div><strong>Scope controls</strong></div>
+                  <pre>{JSON.stringify(approval.requested_payload_json.scope_control || {}, null, 2)}</pre>
+                </div>
+              ) : isCleanup ? (
                 <div style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 10, padding: 10 }}>
                   <div><strong>Filesystem cleanup operations</strong></div>
                   <ul>
@@ -55,6 +78,16 @@ export function Approvals({ approvals, runId }: { approvals: any[]; runId: strin
                   {approval.requested_payload_json.cleanup_plan?.commit?.enabled ? (
                     <div><strong>Commit:</strong> {approval.requested_payload_json.cleanup_plan.commit.message}</div>
                   ) : null}
+                </div>
+              ) : approval.requested_payload_json?.kind === 'review' ? (
+                <div style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 10, padding: 10 }}>
+                  {approval.requested_payload_json.scope_guard?.reasons?.length ? (
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Scope guard triggered:</strong> {approval.requested_payload_json.scope_guard.reasons.join(', ')}
+                    </div>
+                  ) : null}
+                  <div><strong>Files changed</strong>: {(approval.requested_payload_json.files_changed || []).join(', ') || 'none'}</div>
+                  {approval.requested_payload_json.diff ? <pre>{approval.requested_payload_json.diff}</pre> : null}
                 </div>
               ) : approval.requested_payload_json?.proposals ? (
                 <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
@@ -80,7 +113,11 @@ export function Approvals({ approvals, runId }: { approvals: any[]; runId: strin
                   <input type="hidden" name="approval_id" value={approval.id} />
                   <input type="hidden" name="run_id" value={runId} />
                   <button type="submit" style={{ marginLeft: 8 }}>
-                    {approval.approval_type === 'pr_merge' ? 'Approve & Merge PR' : 'Approve & Resume'}
+                    {approval.approval_type === 'pr_merge'
+                      ? 'Approve & Merge PR'
+                      : approval.requested_payload_json?.kind === 'plan'
+                        ? 'Approve Plan & Start'
+                        : 'Approve & Resume'}
                   </button>
                 </form>
               )}

@@ -66,6 +66,7 @@ you have access to deterministic analysis tools:
 ## Rules
 
 - ALWAYS read the file before editing it. Never edit blind.
+- Stay within the file targets and change rationale supplied by the approved plan.
 - Try `propose_edit` first for simple, well-defined changes. Fall back to manual editing
   for complex changes where the deterministic proposal isn't sufficient.
 - Use `edit_file` with exact string matching — copy the exact text to replace.
@@ -73,6 +74,7 @@ you have access to deterministic analysis tools:
 - If an edit fails (string not found), re-read the file and try again with the correct text.
 - Don't add unnecessary comments, docstrings, or type annotations to code you didn't change.
 - Don't add error handling for scenarios that can't happen.
+- If you discover a need to touch an unplanned file, stop and report it instead of editing that file.
 - If you're unsure about a change, note it in your risks output.
 - Keep changes minimal and focused on the task."""
 

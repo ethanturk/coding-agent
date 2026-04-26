@@ -20,6 +20,13 @@ DEFAULT_SETTINGS = {
         'auto_approve_threshold': 0.8,
         'max_review_iterations': 2,
         'require_human_for_pr_merge': True,
+        'scope_control': {
+            'require_plan_approval': True,
+            'interrupt_before_write': True,
+            'max_files_changed': 3,
+            'max_parallel_developer_tasks': 1,
+            'allow_path_expansion': False,
+        },
     },
 }
 

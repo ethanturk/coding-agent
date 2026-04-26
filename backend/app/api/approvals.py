@@ -51,11 +51,22 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
     single = approval.requested_payload_json if approval.requested_payload_json and 'path' in approval.requested_payload_json else None
     proposal_items = proposals or ([single] if single else [])
 
+    payload = approval.requested_payload_json or {}
+
     if approval.approval_type == ApprovalType.PR_MERGE:
         return {"ok": True, "status": approval.status, "run_id": approval.run_id, "message": "PR merge approvals should be handled via the PR lifecycle action."}
 
-    cleanup_ops = (approval.requested_payload_json or {}).get('operations') if approval.requested_payload_json else None
-    cleanup_mode = (approval.requested_payload_json or {}).get('mode') if approval.requested_payload_json else None
+    if payload.get('kind') == 'plan':
+        if run:
+            run.status = RunStatus.QUEUED
+            run.final_summary = 'Plan approved, implementation resumed'
+            db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='plan.approved', payload_json={'approval_id': approval.id, 'scope_control': payload.get('scope_control', {})}))
+        db.commit()
+        threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "plan_approved": True}
+
+    cleanup_ops = payload.get('operations') if payload else None
+    cleanup_mode = payload.get('mode') if payload else None
 
     if cleanup_mode == 'filesystem_cleanup' and cleanup_ops and run and env and env.container_id:
         applied_paths = []
@@ -92,6 +103,7 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
 
     if run:
         run.status = RunStatus.QUEUED
+        run.final_summary = 'Approval accepted, run resumed'
     db.commit()
     threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
     return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True}

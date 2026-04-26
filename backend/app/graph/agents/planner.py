@@ -53,9 +53,11 @@ Your final message must be a JSON object with this structure:
 
 - Be thorough but concise. Read files before making assumptions.
 - Don't guess at file contents — use `read_file` and `grep` to verify.
+- Only include files that are necessary for the requested change. Do not expand scope casually.
 - Order targets by dependency (independent changes first).
 - Flag any ambiguity in the goal that might need clarification.
-- If the goal is unclear or impossible, say so clearly in your summary."""
+- If the goal is unclear or impossible, say so clearly in your summary.
+- If you think additional files may be needed beyond the obvious scope, call that out in `risks` instead of silently broadening the plan."""
 
 PLANNER_SUBAGENT: SubAgent = {
     "name": "planner",
