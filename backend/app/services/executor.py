@@ -13,6 +13,7 @@ import json
 import logging
 from pathlib import Path
 
+from sqlalchemy import cast, String
 from sqlalchemy.orm import Session
 
 from app.models import Approval, Artifact, Event, Project, Run, Step
@@ -250,7 +251,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             .filter(
                 Approval.run_id == run.id,
                 Approval.approval_type == ApprovalType.GOVERNANCE,
-                Approval.status.in_([ApprovalStatus.APPROVED, ApprovalStatus.OVERRIDDEN]),
+                cast(Approval.status, String).in_(['APPROVED', 'overridden']),
             )
             .order_by(Approval.created_at.desc())
             .first()
