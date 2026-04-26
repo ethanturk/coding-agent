@@ -91,11 +91,11 @@ def _add_artifact(
     return artifact
 
 
-def _bootstrap_sandbox(db: Session, run: Run, project: Project):
+def _bootstrap_sandbox(db: Session, run: Run, project: Project, *, force_clean_repo: bool = False):
     """Create and initialize Docker sandbox for a run."""
     env = ensure_docker_environment(db, run, project)
     env = create_container(db, env)
-    bootstrap = bootstrap_repo_in_container(db, env, project)
+    bootstrap = bootstrap_repo_in_container(db, env, project, force_clean=force_clean_repo)
     if not bootstrap.get("ok"):
         raise ValueError(bootstrap.get("stderr") or "Failed to bootstrap repo in container")
     db.add(
@@ -180,6 +180,27 @@ def _implementation_project_context(project: Project, env, scope_control: dict, 
     return "\n".join(project_context_parts)
 
 
+def _run_has_completed_implementation(db: Session, run_id: str) -> bool:
+    return (
+        db.query(Step)
+        .filter(
+            Step.run_id == run_id,
+            Step.kind == StepKind.IMPLEMENTATION,
+            Step.status == StepStatus.COMPLETED,
+        )
+        .first()
+        is not None
+    )
+
+
+def _approved_plan_requires_continuation(approved_plan: dict | None) -> bool:
+    if not approved_plan:
+        return False
+    if approved_plan.get('mode') == 'filesystem_cleanup':
+        return True
+    return bool(approved_plan.get('operations'))
+
+
 def execute_run(db: Session, run_id: str) -> Run | None:
     """Execute a run using the DeepAgents orchestrator.
 
@@ -222,9 +243,25 @@ def execute_run(db: Session, run_id: str) -> Run | None:
     )
     db.commit()
 
+    approved_plan_row = None
+    if scope_control.get("require_plan_approval"):
+        approved_plan_row = (
+            db.query(Approval)
+            .filter(
+                Approval.run_id == run.id,
+                Approval.approval_type == ApprovalType.GOVERNANCE,
+                Approval.status.in_([ApprovalStatus.APPROVED, ApprovalStatus.OVERRIDDEN]),
+            )
+            .order_by(Approval.created_at.desc())
+            .first()
+        )
+        approved_plan = extract_approved_plan(approved_plan_row.requested_payload_json if approved_plan_row else None)
+
+    force_clean_repo = _run_has_completed_implementation(db, run.id) and _approved_plan_requires_continuation(approved_plan)
+
     # --- Step 1: Bootstrap sandbox ---
     try:
-        env = _bootstrap_sandbox(db, run, project)
+        env = _bootstrap_sandbox(db, run, project, force_clean_repo=force_clean_repo)
     except Exception as exc:
         run.status = RunStatus.FAILED
         run.final_summary = f"Sandbox bootstrap failed: {exc}"
@@ -308,17 +345,6 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             .order_by(Approval.created_at.desc())
             .first()
         )
-        approved_plan_row = (
-            db.query(Approval)
-            .filter(
-                Approval.run_id == run.id,
-                Approval.approval_type == ApprovalType.GOVERNANCE,
-                Approval.status == ApprovalStatus.APPROVED,
-            )
-            .order_by(Approval.created_at.desc())
-            .first()
-        )
-        approved_plan = extract_approved_plan(approved_plan_row.requested_payload_json if approved_plan_row else None)
 
         if not approved_plan:
             plan, plan_enrichment = _build_plan_for_run(db, env, run.goal)
@@ -376,6 +402,21 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             db.commit()
             db.refresh(run)
             return run
+
+        if force_clean_repo:
+            db.add(
+                Event(
+                    id=_id("evt"),
+                    run_id=run.id,
+                    step_id=planning_step.id,
+                    event_type="sandbox.repo_reset",
+                    payload_json={
+                        "reason": "resume_from_approved_plan",
+                        "approved_plan_mode": approved_plan.get('mode') if approved_plan else None,
+                    },
+                )
+            )
+            db.commit()
 
     # --- Step 4: Invoke orchestrator ---
     implementation_step = Step(

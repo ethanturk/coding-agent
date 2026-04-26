@@ -151,10 +151,16 @@ def configure_repo_git_identity(env: ExecutionEnvironment, name: str, email: str
     )
 
 
-def bootstrap_repo_in_container(db: Session, env: ExecutionEnvironment, project: Project) -> dict:
+def bootstrap_repo_in_container(db: Session, env: ExecutionEnvironment, project: Project, *, force_clean: bool = False) -> dict:
     if not project.repo_url:
         return {'ok': False, 'stderr': 'Project has no repo_url configured'}
     exec_in_container(env, 'apt-get update >/dev/null 2>&1 && apt-get install -y git >/dev/null 2>&1')
+    if force_clean:
+        clean_result = exec_in_container(env, f"rm -rf {env.repo_dir}")
+        if not clean_result['ok']:
+            env.status = EnvironmentStatus.FAILED
+            db.commit()
+            return clean_result
     repo_url = project.repo_url
     if repo_url.startswith('https://github.com/'):
         repo_url = repo_url.replace('https://github.com/', 'https://x-access-token:$GITHUB_TOKEN@github.com/')
@@ -188,6 +194,7 @@ def bootstrap_repo_in_container(db: Session, env: ExecutionEnvironment, project:
         'git_identity': identity_result,
         'repo_dir': env.repo_dir,
         'branch': branch,
+        'force_clean': force_clean,
     }
 
 

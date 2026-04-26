@@ -1,4 +1,4 @@
-from app.services.executor import _should_auto_approve
+from app.services.executor import _approved_plan_requires_continuation, _should_auto_approve
 
 
 def test_auto_approve_blocks_when_scope_guard_requires_review():
@@ -38,3 +38,8 @@ def test_auto_approve_rejects_request_changes_even_if_confident():
     )
 
     assert allowed is False
+
+
+def test_approved_cleanup_plan_requires_continuation():
+    assert _approved_plan_requires_continuation({'mode': 'filesystem_cleanup', 'operations': [{'type': 'delete_path', 'path': '.idea/'}]}) is True
+    assert _approved_plan_requires_continuation({'summary': 'edit code', 'targets': [{'path': 'app.py'}]}) is False
