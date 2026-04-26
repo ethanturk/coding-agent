@@ -7,11 +7,11 @@ const DEFAULT_PREVIEW_ITEMS = 6;
 export function ExpandableList<T>({
   items,
   previewItems = DEFAULT_PREVIEW_ITEMS,
-  renderItem,
+  children,
 }: {
   items: T[];
   previewItems?: number;
-  renderItem: (item: T, index: number) => React.ReactNode;
+  children: (visibleItems: T[]) => React.ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasMore = items.length > previewItems;
@@ -23,7 +23,7 @@ export function ExpandableList<T>({
   return (
     <div style={{ display: 'grid', gap: 8 }}>
       <div style={{ maxHeight: expanded ? 'none' : 320, overflow: 'auto' }}>
-        {visible.map((item, index) => renderItem(item, index))}
+        {children(visible)}
       </div>
       {hasMore ? (
         <div>
