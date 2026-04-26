@@ -27,19 +27,14 @@ export function ProviderModelSelector({
     return providersConfig?.[provider]?.models || [];
   }, [provider, providersConfig]);
 
-  useEffect(() => {
-    if (!models.length) {
-      setModel('');
-      return;
-    }
-    if (model && models.includes(model)) return;
-    setModel('');
-  }, [provider, models, model]);
+  const selectedModel = useMemo(() => {
+    if (!models.length) return '';
+    return model && models.includes(model) ? model : '';
+  }, [models, model]);
 
   useEffect(() => {
-    onChange?.({ provider, model });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, model]);
+    onChange?.({ provider, model: selectedModel });
+  }, [provider, selectedModel, onChange]);
 
   return (
     <div className="grid" style={{ gap: 8 }}>
@@ -47,7 +42,7 @@ export function ProviderModelSelector({
         {allowBlankProvider ? <option value="">Use default</option> : null}
         {providers.map((p) => <option key={p} value={p}>{p}</option>)}
       </select>
-      <select name={modelName} value={model} onChange={(e) => setModel(e.target.value)}>
+      <select name={modelName} value={selectedModel} onChange={(e) => setModel(e.target.value)}>
         <option value="">{allowBlankProvider ? 'Use default model' : 'Select model'}</option>
         {models.map((m: string) => <option key={m} value={m}>{m}</option>)}
       </select>

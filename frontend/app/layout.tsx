@@ -1,9 +1,11 @@
-import './globals.css'
+import Link from 'next/link';
+
+import './globals.css';
 
 export const metadata = {
   title: 'Agent Platform Mission Control',
   description: 'Programming agent orchestration dashboard',
-}
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -13,17 +15,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <aside className="sidebar">
             <div className="brand">Mission Control</div>
             <nav className="nav">
-              <a href="/">Overview</a>
-              <a href="/projects">Projects</a>
-              <a href="/runs">Runs</a>
-              <a href="/approvals">Approvals</a>
-              <a href="/settings">Settings</a>
-              <a href="/runs/new">New Run</a>
+              <Link href="/">Overview</Link>
+              <Link href="/projects">Projects</Link>
+              <Link href="/runs">Runs</Link>
+              <Link href="/approvals">Approvals</Link>
+              <Link href="/settings">Settings</Link>
+              <Link href="/runs/new">New Run</Link>
             </nav>
           </aside>
           <div className="content">{children}</div>
         </div>
       </body>
     </html>
-  )
+  );
 }
