@@ -29,7 +29,31 @@ export function SettingsEditor({ initial }: { initial: any }) {
       },
     },
   };
-  const [settings, setSettings] = useState(initial ?? fallback);
+
+  function mergeSettings(value: any) {
+    return {
+      ...fallback,
+      ...(value || {}),
+      default: { ...fallback.default, ...(value?.default || {}) },
+      providers: {
+        openai: { ...fallback.providers.openai, ...(value?.providers?.openai || {}) },
+        openai_compatible: { ...fallback.providers.openai_compatible, ...(value?.providers?.openai_compatible || {}) },
+        z_ai_coding: { ...fallback.providers.z_ai_coding, ...(value?.providers?.z_ai_coding || {}) },
+      },
+      prompting: { ...fallback.prompting, ...(value?.prompting || {}) },
+      roles: { ...(fallback.roles || {}), ...(value?.roles || {}) },
+      autonomy: {
+        ...fallback.autonomy,
+        ...(value?.autonomy || {}),
+        scope_control: {
+          ...fallback.autonomy.scope_control,
+          ...(value?.autonomy?.scope_control || {}),
+        },
+      },
+    };
+  }
+
+  const [settings, setSettings] = useState(mergeSettings(initial));
   const [status, setStatus] = useState('saved');
 
   useEffect(() => {
@@ -48,12 +72,17 @@ export function SettingsEditor({ initial }: { initial: any }) {
 
   function patch(path: string[], value: any) {
     setSettings((prev: any) => {
-      let current = prev;
-      for (let i = 0; i < path.length; i++) current = current[path[i]];
-      if (JSON.stringify(current) === JSON.stringify(value)) return prev;
-      const next = structuredClone(prev);
+      const next = mergeSettings(prev);
+      let current = next;
+      for (let i = 0; i < path.length; i++) {
+        current = current?.[path[i]];
+      }
+      if (JSON.stringify(current) === JSON.stringify(value)) return next;
       let node = next;
-      for (let i = 0; i < path.length - 1; i++) node = node[path[i]];
+      for (let i = 0; i < path.length - 1; i++) {
+        if (typeof node[path[i]] !== 'object' || node[path[i]] === null) node[path[i]] = {};
+        node = node[path[i]];
+      }
       node[path[path.length - 1]] = value;
       return next;
     });
