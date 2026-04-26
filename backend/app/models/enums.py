@@ -42,6 +42,7 @@ class ApprovalStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    OVERRIDDEN = "overridden"
 
 
 class ApprovalType(str, enum.Enum):

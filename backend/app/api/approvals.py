@@ -38,6 +38,14 @@ def list_approvals(run_id: str, db: Session = Depends(get_db)):
     ]
 
 
+def _resume_run(run, db: Session, *, summary: str, event_type: str, payload: dict):
+    run.status = RunStatus.QUEUED
+    run.final_summary = summary
+    db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type=event_type, payload_json=payload))
+    db.commit()
+    threading.Thread(target=_resume_run_async, args=(run.id,), daemon=True).start()
+
+
 @router.post("/{approval_id}/approve")
 def approve(approval_id: str, db: Session = Depends(get_db)):
     approval = db.get(Approval, approval_id)
@@ -58,11 +66,16 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
 
     if payload.get('kind') == 'plan':
         if run:
-            run.status = RunStatus.QUEUED
-            run.final_summary = 'Plan approved, implementation resumed'
-            db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='plan.approved', payload_json={'approval_id': approval.id, 'scope_control': payload.get('scope_control', {}), 'files': payload.get('files_changed', [])}))
-        db.commit()
-        threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+            _resume_run(
+                run,
+                db,
+                summary='Plan approved, implementation resumed',
+                event_type='plan.approved',
+                payload={'approval_id': approval.id, 'scope_control': payload.get('scope_control', {}), 'files': payload.get('files_changed', []), 'mode': payload.get('mode')},
+            )
+        else:
+            db.commit()
+            threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
         return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "plan_approved": True, "files": payload.get('files_changed', [])}
 
     cleanup_ops = payload.get('operations') if payload else None
@@ -80,10 +93,7 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
             applied_paths.append(op['path'])
             db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='filesystem.path_deleted', payload_json={'path': op['path']}))
         db.add(Artifact(id=_id('art'), run_id=run.id, step_id=run.current_step_id, artifact_type=ArtifactType.LOG, name='filesystem-cleanup.log', storage_uri=f"container://{env.container_id}/{env.repo_dir}", summary='Applied approved filesystem cleanup'))
-        run.status = RunStatus.QUEUED
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.resumed', payload_json={'reason': 'approved_filesystem_cleanup', 'paths': applied_paths}))
-        db.commit()
-        threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+        _resume_run(run, db, summary='Approved filesystem cleanup resumed', event_type='run.resumed', payload={'reason': 'approved_filesystem_cleanup', 'paths': applied_paths})
         return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "cleanup_applied": True, "paths": applied_paths}
 
     if proposal_items and run and env and env.container_id:
@@ -95,15 +105,38 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
             applied_paths.append(proposal['path'])
             db.add(Artifact(id=_id('art'), run_id=run.id, step_id=run.current_step_id, artifact_type=ArtifactType.LOG, name=proposal['path'], storage_uri=f"container://{env.container_id}/{env.repo_dir}/{proposal['path']}", summary='Applied approved edit'))
             db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='edit.applied', payload_json={'path': proposal['path']}))
-        run.status = RunStatus.QUEUED
-        db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='run.resumed', payload_json={'reason': 'approved_edit_proposal', 'paths': applied_paths}))
-        db.commit()
-        threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+        _resume_run(run, db, summary='Approved edit proposal resumed', event_type='run.resumed', payload={'reason': 'approved_edit_proposal', 'paths': applied_paths})
         return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "edit_applied": True, "paths": applied_paths}
 
     if run:
-        run.status = RunStatus.QUEUED
-        run.final_summary = 'Approval accepted, run resumed'
-    db.commit()
-    threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+        _resume_run(run, db, summary='Approval accepted, run resumed', event_type='run.resumed', payload={'reason': 'approval_accepted'})
+    else:
+        db.commit()
+        threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
     return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True}
+
+
+@router.post("/{approval_id}/override")
+def override_block(approval_id: str, db: Session = Depends(get_db)):
+    approval = db.get(Approval, approval_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    payload = approval.requested_payload_json or {}
+    if not payload.get('override_block_allowed'):
+        raise HTTPException(status_code=400, detail="Override is not allowed for this approval")
+
+    approval.status = ApprovalStatus.OVERRIDDEN
+    approval.response_payload_json = {'override_block': True}
+    run = db.get(Run, approval.run_id)
+    if run:
+        _resume_run(
+            run,
+            db,
+            summary='Human override accepted, run resumed',
+            event_type='approval.overridden',
+            payload={'approval_id': approval.id, 'kind': payload.get('kind'), 'override_block': True},
+        )
+    else:
+        db.commit()
+        threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
+    return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "override_block": True}

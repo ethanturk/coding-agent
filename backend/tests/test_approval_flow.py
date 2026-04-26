@@ -83,6 +83,26 @@ def test_build_plan_approval_payload_includes_targets_and_scope_control():
     assert payload['kind'] == 'plan'
     assert payload['summary']['files'] == ['backend/api.py', 'backend/test_api.py']
     assert payload['scope_control'] == scope_control
+    assert payload['override_block_allowed'] is True
+
+
+def test_build_plan_approval_payload_for_cleanup_uses_operations():
+    plan = {
+        'mode': 'filesystem_cleanup',
+        'summary': 'Delete requested directories only',
+        'operations': [
+            {'type': 'delete_path', 'path': '.idea/'},
+            {'type': 'delete_path', 'path': '.opencode/'},
+        ],
+        'verification': ['git status --short'],
+        'commit': {'enabled': True, 'message': 'Remove IDE files'},
+    }
+
+    payload = build_plan_approval_payload(plan, get_scope_control({}))
+
+    assert payload['mode'] == 'filesystem_cleanup'
+    assert payload['summary']['files'] == ['.idea/', '.opencode/']
+    assert payload['operations'] == plan['operations']
 
 
 def test_build_review_approval_payload_includes_scope_guard_reason():
@@ -97,6 +117,7 @@ def test_build_review_approval_payload_includes_scope_guard_reason():
     assert payload['kind'] == 'review'
     assert payload['summary']['reason'] == 'file_budget_exceeded'
     assert payload['files_changed'] == ['a.py', 'b.py']
+    assert payload['override_block_allowed'] is True
 
 
 def test_extract_approved_plan_returns_only_plan_payloads():

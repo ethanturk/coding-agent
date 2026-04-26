@@ -34,18 +34,24 @@ def should_interrupt_before_write(settings: dict | None) -> bool:
 def build_plan_approval_payload(plan: dict[str, Any], scope_control: dict[str, Any], *, thread_id: str | None = None) -> dict[str, Any]:
     targets = plan.get('targets') or []
     files = [target.get('path') for target in targets if target.get('path')]
+    operations = plan.get('operations') or []
+    is_cleanup = plan.get('mode') == 'filesystem_cleanup'
+    cleanup_paths = [op.get('path') for op in operations if op.get('path')]
     return {
         'kind': 'plan',
         'summary': {
             'text': plan.get('summary') or 'Approve implementation plan',
-            'files': files,
-            'target_count': len(files),
+            'files': cleanup_paths if is_cleanup else files,
+            'target_count': len(cleanup_paths if is_cleanup else files),
             'risks': plan.get('risks') or [],
         },
         'plan': plan,
         'scope_control': scope_control,
         'files_changed': files,
         'thread_id': thread_id,
+        'mode': plan.get('mode', 'code_edit'),
+        'operations': operations,
+        'override_block_allowed': True,
     }
 
 
@@ -65,7 +71,7 @@ def classify_changed_files(files_changed: list[Any]) -> list[str]:
 
 def extract_approved_plan(approval_payload: dict[str, Any] | None) -> dict[str, Any] | None:
     payload = approval_payload or {}
-    if payload.get('kind') != 'plan':
+    if payload.get('kind') != 'plan' and not payload.get('override_block'):
         return None
     plan = payload.get('plan')
     if not isinstance(plan, dict):
@@ -102,6 +108,7 @@ def build_review_approval_payload(*, agent_result: dict[str, Any], diff: str, fi
         'files_changed': files_changed,
         'scope_guard': scope_guard,
         'scope_control': scope_control,
+        'override_block_allowed': True,
         'summary': {
             'text': agent_result.get('review_summary') or 'Review DeepAgents changes',
             'files': files_changed,

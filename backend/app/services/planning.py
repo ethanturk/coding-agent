@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from app.services.developer_agent import infer_targets_from_repo, search_terms_from_goal
+from app.services.filesystem_planner import build_filesystem_cleanup_plan, classify_goal_mode
 from app.services.llm_planner import enrich_edit_plan
 
 
@@ -14,6 +15,10 @@ def collect_repo_files(repo_listing: str) -> list[str]:
 
 
 def build_initial_plan(goal: str, repo_files: list[str], search_context: dict | None = None) -> dict:
+    goal_mode = classify_goal_mode(goal)
+    if goal_mode.get('mode') == 'filesystem_cleanup':
+        return build_filesystem_cleanup_plan(goal, repo_files)
+
     targets = infer_targets_from_repo(goal, repo_files)[:PLAN_LIMIT]
     search_terms = search_terms_from_goal(goal)
     search_context = search_context or {}
