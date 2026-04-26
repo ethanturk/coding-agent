@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi import HTTPException
@@ -50,6 +51,7 @@ def test_override_block_marks_approval_overridden_and_resumes(monkeypatch):
         requested_payload_json={'kind': 'plan', 'override_block_allowed': True},
         response_payload_json=None,
         status=ApprovalStatus.PENDING,
+        created_at=datetime.now(timezone.utc),
     )
     run = SimpleNamespace(id='run_1', current_step_id='step_1', status=RunStatus.WAITING_FOR_HUMAN, final_summary='waiting')
     db = FakeDb(approval, run)
@@ -83,6 +85,7 @@ def test_override_block_rejects_when_not_allowed():
         requested_payload_json={'kind': 'other', 'override_block_allowed': False},
         response_payload_json=None,
         status=ApprovalStatus.PENDING,
+        created_at=datetime.now(timezone.utc),
     )
     db = FakeDb(approval, None)
 
@@ -104,6 +107,7 @@ def test_list_approvals_backfills_override_for_pending_plan_and_review():
         approval_type='governance',
         status=ApprovalStatus.PENDING,
         requested_payload_json={'kind': 'plan'},
+        created_at=datetime(2026, 4, 26, 15, 0, tzinfo=timezone.utc),
     )
     review = SimpleNamespace(
         id='apr_review',
@@ -113,6 +117,7 @@ def test_list_approvals_backfills_override_for_pending_plan_and_review():
         approval_type='governance',
         status=ApprovalStatus.PENDING,
         requested_payload_json={'kind': 'review'},
+        created_at=datetime(2026, 4, 26, 15, 5, tzinfo=timezone.utc),
     )
     db = FakeDb(plan, None)
     db._approvals = [plan, review]
@@ -121,6 +126,8 @@ def test_list_approvals_backfills_override_for_pending_plan_and_review():
 
     assert approvals[0]['requested_payload_json']['override_block_allowed'] is True
     assert approvals[1]['requested_payload_json']['override_block_allowed'] is True
+    assert approvals[0]['created_at'] == plan.created_at
+    assert approvals[1]['created_at'] == review.created_at
     assert plan.requested_payload_json['override_block_allowed'] is True
     assert review.requested_payload_json['override_block_allowed'] is True
     assert db.committed is True

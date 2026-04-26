@@ -36,6 +36,7 @@ def _with_legacy_override_backfill(approval: Approval) -> dict:
         "approval_type": approval.approval_type,
         "status": approval.status,
         "requested_payload_json": payload,
+        "created_at": approval.created_at,
     }
 
 

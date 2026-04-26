@@ -27,6 +27,13 @@ async function overrideAction(formData: FormData) {
   redirect(`/runs/${runId}`);
 }
 
+function formatApprovalTimestamp(value?: string) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 export function Approvals({ approvals, runId }: { approvals: any[]; runId: string }) {
   if (!approvals.length) return null;
 
@@ -36,11 +43,13 @@ export function Approvals({ approvals, runId }: { approvals: any[]; runId: strin
       <ul>
         {approvals.map((approval) => {
           const isCleanup = approval.requested_payload_json?.mode === 'filesystem_cleanup';
+          const createdAt = formatApprovalTimestamp(approval.created_at);
           return (
             <li key={approval.id}>
               <div>
                 <strong>{approvalTypeLabel(approval.approval_type, approval.requested_payload_json?.kind)}</strong>: {approval.title} — {approval.status}
               </div>
+              {createdAt ? <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>Requested: {createdAt}</div> : null}
               {approval.requested_payload_json?.summary ? (
                 <div style={{ color: 'var(--muted)', marginTop: 6 }}>
                   {approval.requested_payload_json.summary.text || approval.requested_payload_json.summary.summary}
