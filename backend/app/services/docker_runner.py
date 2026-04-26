@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import ExecutionEnvironment, Project, Run
 from app.models.enums import EnvironmentStatus
 from app.services.runs import _id
+from app.services.settings import DEFAULT_SETTINGS
 
 BASE = Path('/home/ethanturk/.openclaw/workspace/coding-agent/runtime_containers')
 DEFAULT_IMAGE = 'python:3.11.5-slim'
@@ -141,6 +142,15 @@ def git_diff_in_container(env: ExecutionEnvironment) -> dict:
     return exec_in_container(env, f"cd {env.repo_dir} && git diff -- .")
 
 
+def configure_repo_git_identity(env: ExecutionEnvironment, name: str, email: str) -> dict:
+    safe_name = name.replace("'", "'\"'\"'")
+    safe_email = email.replace("'", "'\"'\"'")
+    return exec_in_container(
+        env,
+        f"cd {env.repo_dir} && git config user.name '{safe_name}' && git config user.email '{safe_email}'",
+    )
+
+
 def bootstrap_repo_in_container(db: Session, env: ExecutionEnvironment, project: Project) -> dict:
     if not project.repo_url:
         return {'ok': False, 'stderr': 'Project has no repo_url configured'}
@@ -159,19 +169,37 @@ def bootstrap_repo_in_container(db: Session, env: ExecutionEnvironment, project:
         env.status = EnvironmentStatus.FAILED
         db.commit()
         return checkout_result
+    identity = DEFAULT_SETTINGS.get('git', {}).get('identity', {})
+    identity_result = configure_repo_git_identity(
+        env,
+        identity.get('name') or 'Agent Platform',
+        identity.get('email') or 'agent-platform@local',
+    )
+    if not identity_result['ok']:
+        env.status = EnvironmentStatus.FAILED
+        db.commit()
+        return identity_result
     env.status = EnvironmentStatus.RUNNING
     db.commit()
-    return {'ok': True, 'clone': clone_result, 'checkout': checkout_result, 'repo_dir': env.repo_dir, 'branch': branch}
+    return {
+        'ok': True,
+        'clone': clone_result,
+        'checkout': checkout_result,
+        'git_identity': identity_result,
+        'repo_dir': env.repo_dir,
+        'branch': branch,
+    }
 
 
 def push_branch_from_container(env: ExecutionEnvironment, project: Project, message: str = 'agent-platform update') -> dict:
     repo_url = project.repo_url or ''
     if repo_url.startswith('https://github.com/'):
         repo_url = repo_url.replace('https://github.com/', 'https://x-access-token:$GITHUB_TOKEN@github.com/')
+    identity = DEFAULT_SETTINGS.get('git', {}).get('identity', {})
     commands = [
         f"cd {env.repo_dir}",
-        "git config user.name 'Agent Platform'",
-        "git config user.email 'agent-platform@local'",
+        f"git config user.name '{(identity.get('name') or 'Agent Platform').replace("'", "'\"'\"'")}'",
+        f"git config user.email '{(identity.get('email') or 'agent-platform@local').replace("'", "'\"'\"'")}'",
         "git add .",
         f"git commit -m \"{message}\" || true",
         f"git remote set-url origin {repo_url}",

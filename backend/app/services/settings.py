@@ -28,6 +28,12 @@ DEFAULT_SETTINGS = {
             'allow_path_expansion': False,
         },
     },
+    'git': {
+        'identity': {
+            'name': 'Agent Platform',
+            'email': 'agent-platform@local',
+        },
+    },
 }
 
 
