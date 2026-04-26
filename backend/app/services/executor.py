@@ -36,6 +36,7 @@ from app.services.approval_flow import (
 )
 from app.services.context_manager import resolve_langchain_model
 from app.services.deepagents_fs import DockerSandbox
+from app.services.planning import build_initial_plan, collect_repo_files, enrich_plan_if_possible
 from app.services.docker_runner import (
     bootstrap_repo_in_container,
     create_container,
@@ -48,6 +49,15 @@ from app.services.settings import get_settings, resolve_role_model
 logger = logging.getLogger(__name__)
 
 ARTIFACT_BASE = Path("/home/ethanturk/.openclaw/workspace/coding-agent/runtime_artifacts")
+
+
+def _find_pending_plan_approval(db: Session, run_id: str) -> Approval | None:
+    return (
+        db.query(Approval)
+        .filter(Approval.run_id == run_id, Approval.status == ApprovalStatus.APPROVED)
+        .order_by(Approval.created_at.desc())
+        .first()
+    )
 
 
 def _write_artifact_file(run_id: str, name: str, content: str) -> str:
@@ -142,6 +152,16 @@ def _should_auto_approve(settings: dict, agent_result: dict, *, scope_guard: dic
     return confidence >= threshold
 
 
+def _build_plan_for_run(db: Session, env, goal: str) -> tuple[dict, dict]:
+    repo_result = exec_in_container(env, f"cd {env.repo_dir} && git ls-files")
+    if not repo_result.get('ok'):
+        raise ValueError(repo_result.get('stderr') or 'Failed to inspect repository files for planning')
+    repo_files = collect_repo_files(repo_result.get('stdout') or '')
+    draft_plan = build_initial_plan(goal, repo_files)
+    enriched = enrich_plan_if_possible(db, goal, repo_files, draft_plan)
+    return enriched['plan'], enriched.get('enrichment') or {'used': False, 'reason': 'not_available'}
+
+
 def execute_run(db: Session, run_id: str) -> Run | None:
     """Execute a run using the DeepAgents orchestrator.
 
@@ -166,6 +186,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         for role in ("orchestrator", "planner", "developer", "reviewer", "tester", "reporter")
     }
     scope_control = get_scope_control(settings)
+    approved_plan = None
 
     run.status = RunStatus.RUNNING
     db.add(
@@ -276,54 +297,89 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         db.refresh(run)
         return run
 
+    pending_plan_approval = None
     if scope_control.get("require_plan_approval"):
-        plan_step = Step(
-            id=_id("step"),
-            run_id=run.id,
-            sequence_index=2,
-            kind=StepKind.REVIEW,
-            role=AgentRole.PLANNER,
-            title="Approve implementation plan",
-            status=StepStatus.BLOCKED,
-            input_json={"goal": run.goal, "scope_control": scope_control},
-            output_json={
-                "summary": "Plan approval required before implementation.",
-                "targets": [],
-                "risks": [],
-            },
-        )
-        db.add(plan_step)
-        db.flush()
-        plan_payload = build_plan_approval_payload(plan_step.output_json or {}, scope_control)
-        approval = Approval(
-            id=_id("apr"),
-            run_id=run.id,
-            step_id=plan_step.id,
-            title="Approve implementation plan",
-            approval_type=ApprovalType.GOVERNANCE,
-            status=ApprovalStatus.PENDING,
-            requested_payload_json=plan_payload,
-        )
-        db.add(approval)
-        run.status = RunStatus.WAITING_FOR_HUMAN
-        run.current_step_id = plan_step.id
-        run.final_summary = "Awaiting plan approval before implementation"
-        db.add(
-            Event(
-                id=_id("evt"),
-                run_id=run.id,
-                step_id=plan_step.id,
-                event_type="run.blocked",
-                payload_json={
-                    "reason": "plan_approval_required",
-                    "approval_id": approval.id,
-                    "scope_control": scope_control,
-                },
+        pending_plan_approval = (
+            db.query(Approval)
+            .filter(
+                Approval.run_id == run.id,
+                Approval.approval_type == ApprovalType.GOVERNANCE,
+                Approval.status == ApprovalStatus.PENDING,
             )
+            .order_by(Approval.created_at.desc())
+            .first()
         )
-        db.commit()
-        db.refresh(run)
-        return run
+        approved_plan = (
+            db.query(Approval)
+            .filter(
+                Approval.run_id == run.id,
+                Approval.approval_type == ApprovalType.GOVERNANCE,
+                Approval.status == ApprovalStatus.APPROVED,
+            )
+            .order_by(Approval.created_at.desc())
+            .first()
+        )
+        if approved_plan and (approved_plan.requested_payload_json or {}).get('kind') == 'plan':
+            approved_plan = approved_plan.requested_payload_json.get('plan')
+        else:
+            approved_plan = None
+
+        if not approved_plan:
+            plan, plan_enrichment = _build_plan_for_run(db, env, run.goal)
+            planning_step.output_json = {
+                **plan,
+                'enrichment': plan_enrichment,
+            }
+            planning_step.status = StepStatus.BLOCKED
+            plan_path = _write_artifact_file(
+                run.id,
+                'implementation-plan.json',
+                json.dumps(planning_step.output_json, indent=2, default=str),
+            )
+            _add_artifact(
+                db,
+                run,
+                planning_step,
+                ArtifactType.SUMMARY,
+                'implementation-plan.json',
+                plan_path,
+                'Planner output awaiting approval',
+            )
+            if pending_plan_approval is None:
+                approval = Approval(
+                    id=_id("apr"),
+                    run_id=run.id,
+                    step_id=planning_step.id,
+                    title="Approve implementation plan",
+                    approval_type=ApprovalType.GOVERNANCE,
+                    status=ApprovalStatus.PENDING,
+                    requested_payload_json=build_plan_approval_payload(plan, scope_control, thread_id=thread_id if enable_hitl else None),
+                )
+                db.add(approval)
+                approval_id = approval.id
+            else:
+                pending_plan_approval.requested_payload_json = build_plan_approval_payload(plan, scope_control, thread_id=thread_id if enable_hitl else None)
+                approval_id = pending_plan_approval.id
+            run.status = RunStatus.WAITING_FOR_HUMAN
+            run.current_step_id = planning_step.id
+            run.final_summary = "Awaiting plan approval before implementation"
+            db.add(
+                Event(
+                    id=_id("evt"),
+                    run_id=run.id,
+                    step_id=planning_step.id,
+                    event_type="run.blocked",
+                    payload_json={
+                        "reason": "plan_approval_required",
+                        "approval_id": approval_id,
+                        "scope_control": scope_control,
+                        "planned_files": [target.get('path') for target in plan.get('targets', []) if target.get('path')],
+                    },
+                )
+            )
+            db.commit()
+            db.refresh(run)
+            return run
 
     # --- Step 4: Invoke orchestrator ---
     implementation_step = Step(
@@ -337,7 +393,8 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         input_json={
             "goal": run.goal,
             "models": {k: str(v) for k, v in role_model_configs.items()},
-            "planned_files": [],
+            "planned_files": [target.get('path') for target in (approved_plan or {}).get('targets', []) if target.get('path')],
+            "approved_plan": approved_plan,
             "scope_control": scope_control,
         },
     )

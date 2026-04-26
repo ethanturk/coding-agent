@@ -31,7 +31,7 @@ def should_interrupt_before_write(settings: dict | None) -> bool:
     return bool(get_scope_control(settings).get('interrupt_before_write'))
 
 
-def build_plan_approval_payload(plan: dict[str, Any], scope_control: dict[str, Any]) -> dict[str, Any]:
+def build_plan_approval_payload(plan: dict[str, Any], scope_control: dict[str, Any], *, thread_id: str | None = None) -> dict[str, Any]:
     targets = plan.get('targets') or []
     files = [target.get('path') for target in targets if target.get('path')]
     return {
@@ -45,6 +45,7 @@ def build_plan_approval_payload(plan: dict[str, Any], scope_control: dict[str, A
         'plan': plan,
         'scope_control': scope_control,
         'files_changed': files,
+        'thread_id': thread_id,
     }
 
 

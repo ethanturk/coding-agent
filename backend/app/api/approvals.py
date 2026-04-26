@@ -60,10 +60,10 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
         if run:
             run.status = RunStatus.QUEUED
             run.final_summary = 'Plan approved, implementation resumed'
-            db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='plan.approved', payload_json={'approval_id': approval.id, 'scope_control': payload.get('scope_control', {})}))
+            db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='plan.approved', payload_json={'approval_id': approval.id, 'scope_control': payload.get('scope_control', {}), 'files': payload.get('files_changed', [])}))
         db.commit()
         threading.Thread(target=_resume_run_async, args=(approval.run_id,), daemon=True).start()
-        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "plan_approved": True}
+        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "plan_approved": True, "files": payload.get('files_changed', [])}
 
     cleanup_ops = payload.get('operations') if payload else None
     cleanup_mode = payload.get('mode') if payload else None
