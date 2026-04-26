@@ -22,20 +22,40 @@ def _resume_run_async(run_id: str):
         db.close()
 
 
+def _with_legacy_override_backfill(approval: Approval) -> dict:
+    payload = dict(approval.requested_payload_json or {})
+    if approval.status == ApprovalStatus.PENDING and not payload.get('override_block_allowed'):
+        kind = payload.get('kind')
+        if kind in {'plan', 'review'}:
+            payload['override_block_allowed'] = True
+    return {
+        "id": approval.id,
+        "run_id": approval.run_id,
+        "step_id": approval.step_id,
+        "title": approval.title,
+        "approval_type": approval.approval_type,
+        "status": approval.status,
+        "requested_payload_json": payload,
+    }
+
+
 @router.get("/run/{run_id}")
 def list_approvals(run_id: str, db: Session = Depends(get_db)):
-    return [
-        {
-            "id": a.id,
-            "run_id": a.run_id,
-            "step_id": a.step_id,
-            "title": a.title,
-            "approval_type": a.approval_type,
-            "status": a.status,
-            "requested_payload_json": a.requested_payload_json,
-        }
-        for a in db.query(Approval).filter(Approval.run_id == run_id).all()
-    ]
+    approvals = db.query(Approval).filter(Approval.run_id == run_id).all()
+    mutated = False
+    serialized = []
+    for approval in approvals:
+        payload = dict(approval.requested_payload_json or {})
+        if approval.status == ApprovalStatus.PENDING and not payload.get('override_block_allowed'):
+            kind = payload.get('kind')
+            if kind in {'plan', 'review'}:
+                payload['override_block_allowed'] = True
+                approval.requested_payload_json = payload
+                mutated = True
+        serialized.append(_with_legacy_override_backfill(approval))
+    if mutated:
+        db.commit()
+    return serialized
 
 
 def _resume_run(run, db: Session, *, summary: str, event_type: str, payload: dict):

@@ -6,10 +6,22 @@ from app.api import approvals as approvals_api
 from app.models.enums import ApprovalStatus, RunStatus
 
 
+class FakeQuery:
+    def __init__(self, approvals):
+        self._approvals = approvals
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return list(self._approvals)
+
+
 class FakeDb:
     def __init__(self, approval, run):
         self._approval = approval
         self._run = run
+        self._approvals = [approval] if approval else []
         self.events = []
         self.committed = False
 
@@ -20,6 +32,9 @@ class FakeDb:
         if name == 'Run':
             return self._run
         return None
+
+    def query(self, model):
+        return FakeQuery(self._approvals)
 
     def add(self, obj):
         self.events.append(obj)
@@ -65,7 +80,7 @@ def test_override_block_rejects_when_not_allowed():
     approval = SimpleNamespace(
         id='apr_2',
         run_id='run_2',
-        requested_payload_json={'kind': 'review', 'override_block_allowed': False},
+        requested_payload_json={'kind': 'other', 'override_block_allowed': False},
         response_payload_json=None,
         status=ApprovalStatus.PENDING,
     )
@@ -78,3 +93,34 @@ def test_override_block_rejects_when_not_allowed():
         assert exc.detail == 'Override is not allowed for this approval'
     else:
         raise AssertionError('Expected HTTPException for disallowed override')
+
+
+def test_list_approvals_backfills_override_for_pending_plan_and_review():
+    plan = SimpleNamespace(
+        id='apr_plan',
+        run_id='run_3',
+        step_id='step_1',
+        title='Approve implementation plan',
+        approval_type='governance',
+        status=ApprovalStatus.PENDING,
+        requested_payload_json={'kind': 'plan'},
+    )
+    review = SimpleNamespace(
+        id='apr_review',
+        run_id='run_3',
+        step_id='step_2',
+        title='Review changes',
+        approval_type='governance',
+        status=ApprovalStatus.PENDING,
+        requested_payload_json={'kind': 'review'},
+    )
+    db = FakeDb(plan, None)
+    db._approvals = [plan, review]
+
+    approvals = approvals_api.list_approvals('run_3', db)
+
+    assert approvals[0]['requested_payload_json']['override_block_allowed'] is True
+    assert approvals[1]['requested_payload_json']['override_block_allowed'] is True
+    assert plan.requested_payload_json['override_block_allowed'] is True
+    assert review.requested_payload_json['override_block_allowed'] is True
+    assert db.committed is True
