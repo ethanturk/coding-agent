@@ -1,5 +1,7 @@
+'use client';
+
 import { ExpandableJsonPanel } from './expandable-json-panel';
-import { ExpandableList } from './expandable-list';
+import { useExpandableItems } from './expandable-list';
 
 function eventTitle(eventType: string) {
   const map: Record<string, string> = {
@@ -35,30 +37,37 @@ function eventSummary(event: any) {
 }
 
 export function RunTimeline({ events }: { events: any[] }) {
+  const { visible, hasMore, expanded, toggleExpanded, totalCount } = useExpandableItems(events, 6);
+
   return (
     <div>
       <h2 className="section-title">Timeline</h2>
-      <ExpandableList items={events} previewItems={6}>
-        {(visibleEvents) => (
-          <>
-            {visibleEvents.map((event) => {
-              const summary = eventSummary(event);
-              return (
-                <div key={event.id} style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 12, alignItems: 'start', marginBottom: 10 }}>
-                  <div style={{ color: 'var(--muted)', fontSize: 12 }}>{new Date(event.created_at).toLocaleTimeString()}</div>
-                  <div style={{ borderLeft: '2px solid var(--border)', paddingLeft: 12 }}>
-                    <div style={{ fontWeight: 600 }}>{eventTitle(event.event_type)}</div>
-                    {summary ? <div className="muted" style={{ marginTop: 4 }}>{summary}</div> : null}
-                    <div style={{ marginTop: 8 }}>
-                      <ExpandableJsonPanel value={event.payload_json} previewLines={6} emptyLabel="No event payload" />
-                    </div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ maxHeight: expanded ? 'none' : 320, overflow: 'auto' }}>
+          {visible.map((event) => {
+            const summary = eventSummary(event);
+            return (
+              <div key={event.id} style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 12, alignItems: 'start', marginBottom: 10 }}>
+                <div style={{ color: 'var(--muted)', fontSize: 12 }}>{new Date(event.created_at).toLocaleTimeString()}</div>
+                <div style={{ borderLeft: '2px solid var(--border)', paddingLeft: 12 }}>
+                  <div style={{ fontWeight: 600 }}>{eventTitle(event.event_type)}</div>
+                  {summary ? <div className="muted" style={{ marginTop: 4 }}>{summary}</div> : null}
+                  <div style={{ marginTop: 8 }}>
+                    <ExpandableJsonPanel value={event.payload_json} previewLines={6} emptyLabel="No event payload" />
                   </div>
                 </div>
-              );
-            })}
-          </>
-        )}
-      </ExpandableList>
+              </div>
+            );
+          })}
+        </div>
+        {hasMore ? (
+          <div>
+            <button type="button" onClick={toggleExpanded}>
+              {expanded ? 'Show less' : `Show all (${totalCount})`}
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -4,15 +4,7 @@ import { useMemo, useState } from 'react';
 
 const DEFAULT_PREVIEW_ITEMS = 6;
 
-export function ExpandableList<T>({
-  items,
-  previewItems = DEFAULT_PREVIEW_ITEMS,
-  children,
-}: {
-  items: T[];
-  previewItems?: number;
-  children: (visibleItems: T[]) => React.ReactNode;
-}) {
+export function useExpandableItems<T>(items: T[], previewItems = DEFAULT_PREVIEW_ITEMS) {
   const [expanded, setExpanded] = useState(false);
   const hasMore = items.length > previewItems;
   const visible = useMemo(
@@ -20,18 +12,11 @@ export function ExpandableList<T>({
     [expanded, hasMore, items, previewItems],
   );
 
-  return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      <div style={{ maxHeight: expanded ? 'none' : 320, overflow: 'auto' }}>
-        {children(visible)}
-      </div>
-      {hasMore ? (
-        <div>
-          <button type="button" onClick={() => setExpanded((value) => !value)}>
-            {expanded ? 'Show less' : `Show all (${items.length})`}
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
+  return {
+    expanded,
+    hasMore,
+    visible,
+    toggleExpanded: () => setExpanded((value) => !value),
+    totalCount: items.length,
+  };
 }
