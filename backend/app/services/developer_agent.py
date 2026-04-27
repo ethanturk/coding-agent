@@ -161,7 +161,6 @@ def expand_companion_files(targets: list[str], files: list[str], goal: str = '')
     lower_goal = goal.lower()
     requests_tests = _goal_requests_tests(lower_goal)
     requests_docs = _goal_requests_docs(lower_goal)
-    requests_config = _goal_requests_config(lower_goal)
     expanded: list[str] = []
     for target in targets:
         if target not in expanded:
@@ -183,10 +182,6 @@ def expand_companion_files(targets: list[str], files: list[str], goal: str = '')
             elif requests_docs and (candidate_lower.endswith('readme.md') or '/docs/' in candidate_lower):
                 if any(keyword in target_lower for keyword in ('settings', 'prompt', 'docker', 'api', 'component')):
                     expanded.append(candidate)
-            elif target_name and target_name in candidate_lower:
-                expanded.append(candidate)
-            elif target_stem and target_stem in candidate_lower:
-                expanded.append(candidate)
     return expanded[:12]
 
 
@@ -203,14 +198,20 @@ def infer_targets_from_repo(goal: str, files: list[str]) -> list[str]:
         if score > 0:
             scored.append((score, candidate))
     scored.sort(key=lambda item: (-item[0], item[1]))
-    for _, candidate in scored[:8]:
+    for score, candidate in scored[:8]:
+        if score <= 0:
+            continue
         if candidate not in inferred:
             inferred.append(candidate)
     if _goal_requests_config(lower):
         for candidate in files:
-            if candidate.endswith(tuple(EDITABLE_SUFFIXES)) and any(token in candidate.lower() for token in ('config', 'settings', 'provider', 'model', 'package')):
-                if candidate not in inferred:
-                    inferred.append(candidate)
+            candidate_lower = candidate.lower()
+            if not candidate.endswith(tuple(EDITABLE_SUFFIXES)):
+                continue
+            if not any(token in candidate_lower for token in ('config', 'settings', 'provider', 'model', 'package')):
+                continue
+            if candidate not in inferred:
+                inferred.append(candidate)
     if _goal_requests_docs(lower) and 'README.md' in files and 'README.md' not in inferred:
         inferred.append('README.md')
     return expand_companion_files(inferred, files, goal)
