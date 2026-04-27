@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 const providers = ['openai', 'openai_compatible', 'z_ai_coding'];
 
@@ -19,8 +19,8 @@ export function ProviderModelSelector({
   allowBlankProvider?: boolean;
   onChange?: (value: { provider: string; model: string }) => void;
 }) {
-  const [provider, setProvider] = useState(value?.provider || (allowBlankProvider ? '' : 'openai'));
-  const [model, setModel] = useState(value?.model || '');
+  const provider = value?.provider || (allowBlankProvider ? '' : 'openai');
+  const model = value?.model || '';
 
   const models = useMemo(() => {
     if (!provider) return [];
@@ -32,17 +32,23 @@ export function ProviderModelSelector({
     return model && models.includes(model) ? model : '';
   }, [models, model]);
 
-  useEffect(() => {
-    onChange?.({ provider, model: selectedModel });
-  }, [provider, selectedModel, onChange]);
+  function handleProviderChange(nextProvider: string) {
+    const nextModels = providersConfig?.[nextProvider]?.models || [];
+    const nextModel = nextModels.includes(model) ? model : '';
+    onChange?.({ provider: nextProvider, model: nextModel });
+  }
+
+  function handleModelChange(nextModel: string) {
+    onChange?.({ provider, model: nextModel });
+  }
 
   return (
     <div className="grid" style={{ gap: 8 }}>
-      <select name={providerName} value={provider} onChange={(e) => setProvider(e.target.value)}>
+      <select name={providerName} value={provider} onChange={(e) => handleProviderChange(e.target.value)}>
         {allowBlankProvider ? <option value="">Use default</option> : null}
         {providers.map((p) => <option key={p} value={p}>{p}</option>)}
       </select>
-      <select name={modelName} value={selectedModel} onChange={(e) => setModel(e.target.value)}>
+      <select name={modelName} value={selectedModel} onChange={(e) => handleModelChange(e.target.value)}>
         <option value="">{allowBlankProvider ? 'Use default model' : 'Select model'}</option>
         {models.map((m: string) => <option key={m} value={m}>{m}</option>)}
       </select>
