@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -242,6 +243,53 @@ def _resolve_models(settings: dict) -> dict:
             logger.warning("Failed to resolve model for role %s: %s", role, exc)
             models[role] = None
     return models
+
+
+def _is_transient_model_error(exc: Exception) -> bool:
+    status_code = getattr(exc, 'status_code', None)
+    if isinstance(status_code, int) and status_code in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+    message = str(exc).lower()
+    transient_markers = [
+        'rate limit',
+        'timeout',
+        'temporarily unavailable',
+        'try again later',
+        'network error',
+        'connection reset',
+        'connection error',
+        'internal server error',
+        'server error',
+        'bad gateway',
+        'gateway timeout',
+        'service unavailable',
+    ]
+    return any(marker in message for marker in transient_markers)
+
+
+
+def _invoke_deep_agent_with_retries(*, agent, goal: str, test_command: str | None, inspect_command: str | None, thread_id: str | None, max_attempts: int = 3, base_delay_seconds: float = 1.5) -> dict:
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return invoke_deep_agent(
+                agent,
+                goal=goal,
+                test_command=test_command,
+                inspect_command=inspect_command,
+                thread_id=thread_id,
+            )
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_attempts or not _is_transient_model_error(exc):
+                raise
+            delay = base_delay_seconds * (2 ** (attempt - 1))
+            logger.warning('Transient model invocation failure on attempt %s/%s, retrying in %.1fs: %s', attempt, max_attempts, delay, exc)
+            time.sleep(delay)
+    if last_exc:
+        raise last_exc
+    raise RuntimeError('Deep agent invocation failed without an exception')
+
 
 
 def _should_auto_approve(settings: dict, agent_result: dict, *, scope_guard: dict | None = None) -> bool:
@@ -578,8 +626,8 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         )
 
     try:
-        agent_result = invoke_deep_agent(
-            agent,
+        agent_result = _invoke_deep_agent_with_retries(
+            agent=agent,
             goal=implementation_goal,
             test_command=project.test_command,
             inspect_command=project.inspect_command,
