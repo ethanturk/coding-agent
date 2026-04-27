@@ -628,9 +628,10 @@ def execute_run(db: Session, run_id: str) -> Run | None:
     implementation_goal = run.goal
     if approved_plan and approved_plan.get('targets'):
         approved_targets = [target for target in approved_plan.get('targets', []) if target.get('path')]
+        approved_plan_prefix = (((settings.get('prompting') or {}).get('templates') or {}).get('approved_plan_prefix') or 'Only implement the approved plan below. Do not modify files outside these targets unless a human explicitly approves it.')
         implementation_goal = (
             f"{run.goal}\n\n"
-            "Only implement the approved plan below. Do not modify files outside these targets unless a human explicitly approves it.\n"
+            f"{approved_plan_prefix}\n"
             f"Approved plan:\n{serialize_plan({'summary': approved_plan.get('summary'), 'targets': approved_targets, 'risks': approved_plan.get('risks', []), 'notes': approved_plan.get('notes', [])})}"
         )
 

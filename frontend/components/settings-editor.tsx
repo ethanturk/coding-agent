@@ -66,7 +66,13 @@ export function SettingsEditor({ initial }: { initial: any }) {
       openai_compatible: { api_key: '', base_url: '', models: [] },
       z_ai_coding: { api_key: '', base_url: '', models: [] },
     },
-    prompting: { max_prompt_length: 1000 },
+    prompting: {
+      max_prompt_length: 1000,
+      templates: {
+        planner_system: 'You are helping a coding agent plan a multi-file code change. Given a user goal, repo search context, and a deterministic draft plan, return compact JSON with keys summary, primary_targets, secondary_targets, risks, and notes. Only include files already present in the draft plan. Respond with raw JSON only.',
+        approved_plan_prefix: 'Only implement the approved plan below. Do not modify files outside these targets unless a human explicitly approves it.',
+      },
+    },
     roles: {},
     autonomy: {
       auto_approve_threshold: 0.8,
@@ -99,7 +105,14 @@ export function SettingsEditor({ initial }: { initial: any }) {
         openai_compatible: { ...fallback.providers.openai_compatible, ...(value?.providers?.openai_compatible || {}) },
         z_ai_coding: { ...fallback.providers.z_ai_coding, ...(value?.providers?.z_ai_coding || {}) },
       },
-      prompting: { ...fallback.prompting, ...(value?.prompting || {}) },
+      prompting: {
+        ...fallback.prompting,
+        ...(value?.prompting || {}),
+        templates: {
+          ...fallback.prompting.templates,
+          ...(value?.prompting?.templates || {}),
+        },
+      },
       roles: { ...(fallback.roles || {}), ...(value?.roles || {}) },
       autonomy: {
         ...fallback.autonomy,
@@ -177,6 +190,23 @@ export function SettingsEditor({ initial }: { initial: any }) {
             />
           </Field>
         </ControlGrid>
+      </SectionCard>
+
+      <SectionCard title="Prompt Templates" description="Edit the main planning and approved-plan wrapper prompts without changing code.">
+        <Field label="Planner system prompt" hint="Used by the planner LLM to reorder and summarize the deterministic draft plan.">
+          <textarea
+            rows={6}
+            value={settings.prompting?.templates?.planner_system || ''}
+            onChange={(e) => patch(['prompting', 'templates', 'planner_system'], e.target.value)}
+          />
+        </Field>
+        <Field label="Approved plan prefix" hint="Prepended before the serialized approved plan when implementation is constrained to approved targets.">
+          <textarea
+            rows={4}
+            value={settings.prompting?.templates?.approved_plan_prefix || ''}
+            onChange={(e) => patch(['prompting', 'templates', 'approved_plan_prefix'], e.target.value)}
+          />
+        </Field>
       </SectionCard>
 
       {providers.map((providerKey) => {

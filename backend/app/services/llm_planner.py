@@ -11,12 +11,12 @@ def enrich_edit_plan(db, goal: str, search_context: dict, edit_plan: dict) -> di
     if not model:
         return {'used': False, 'reason': 'planner model not configured'}
 
-    system = (
+    system = (((settings.get('prompting') or {}).get('templates') or {}).get('planner_system') or (
         'You are helping a coding agent plan a multi-file code change. '
         'Given a user goal, repo search context, and a deterministic draft plan, '
         'return compact JSON with keys summary, primary_targets, secondary_targets, risks, and notes. '
         'Only include files already present in the draft plan. Respond with raw JSON only.'
-    )
+    ))
     result = llm_chat_json(
         db,
         role='planner',

@@ -7,7 +7,13 @@ DEFAULT_SETTINGS = {
         'z_ai_coding': {'api_key': '', 'base_url': '', 'model': ''},
     },
     'default': {'provider': 'openai', 'model': ''},
-    'prompting': {'max_prompt_length': 1000},
+    'prompting': {
+        'max_prompt_length': 1000,
+        'templates': {
+            'planner_system': 'You are helping a coding agent plan a multi-file code change. Given a user goal, repo search context, and a deterministic draft plan, return compact JSON with keys summary, primary_targets, secondary_targets, risks, and notes. Only include files already present in the draft plan. Respond with raw JSON only.',
+            'approved_plan_prefix': 'Only implement the approved plan below. Do not modify files outside these targets unless a human explicitly approves it.',
+        },
+    },
     'roles': {
         'orchestrator': {},
         'planner': {},

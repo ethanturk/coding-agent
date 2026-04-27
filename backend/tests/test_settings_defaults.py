@@ -3,6 +3,10 @@ from app.services import executor as executor_api
 
 
 def test_default_settings_include_model_retry_controls():
+    prompting = DEFAULT_SETTINGS['prompting']
+    assert 'planner_system' in prompting['templates']
+    assert 'approved_plan_prefix' in prompting['templates']
+
     autonomy = DEFAULT_SETTINGS['autonomy']
     assert autonomy['plan_target_cap'] == 12
     retries = autonomy['model_retries']
