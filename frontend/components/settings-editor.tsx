@@ -20,6 +20,10 @@ export function SettingsEditor({ initial }: { initial: any }) {
       auto_approve_threshold: 0.8,
       max_review_iterations: 2,
       require_human_for_pr_merge: true,
+      model_retries: {
+        max_attempts: 3,
+        base_delay_seconds: 1.5,
+      },
       scope_control: {
         require_plan_approval: true,
         interrupt_before_write: true,
@@ -45,6 +49,10 @@ export function SettingsEditor({ initial }: { initial: any }) {
       autonomy: {
         ...fallback.autonomy,
         ...(value?.autonomy || {}),
+        model_retries: {
+          ...fallback.autonomy.model_retries,
+          ...(value?.autonomy?.model_retries || {}),
+        },
         scope_control: {
           ...fallback.autonomy.scope_control,
           ...(value?.autonomy?.scope_control || {}),
@@ -178,6 +186,31 @@ export function SettingsEditor({ initial }: { initial: any }) {
           />
           <span style={{ fontWeight: 700 }}>Require human approval for PR merge</span>
         </label>
+      </div>
+      <div className="card">
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, minmax(140px, 220px))' }}>
+          <label>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Model retry attempts</div>
+            <input
+              type="number"
+              min="1"
+              max="10"
+              value={settings.autonomy?.model_retries?.max_attempts ?? 3}
+              onChange={(e) => patch(['autonomy', 'model_retries', 'max_attempts'], Number(e.target.value || 3))}
+            />
+          </label>
+          <label>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Retry base delay (seconds)</div>
+            <input
+              type="number"
+              min="0"
+              max="30"
+              step="0.5"
+              value={settings.autonomy?.model_retries?.base_delay_seconds ?? 1.5}
+              onChange={(e) => patch(['autonomy', 'model_retries', 'base_delay_seconds'], Number(e.target.value || 1.5))}
+            />
+          </label>
+        </div>
       </div>
 
       <h2 className="section-title">Scope Control</h2>

@@ -269,6 +269,8 @@ def _is_transient_model_error(exc: Exception) -> bool:
 
 
 def _invoke_deep_agent_with_retries(*, agent, goal: str, test_command: str | None, inspect_command: str | None, thread_id: str | None, max_attempts: int = 3, base_delay_seconds: float = 1.5) -> dict:
+    max_attempts = max(1, int(max_attempts))
+    base_delay_seconds = max(0.0, float(base_delay_seconds))
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
@@ -626,12 +628,15 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         )
 
     try:
+        retry_settings = ((settings.get('autonomy') or {}).get('model_retries') or {})
         agent_result = _invoke_deep_agent_with_retries(
             agent=agent,
             goal=implementation_goal,
             test_command=project.test_command,
             inspect_command=project.inspect_command,
             thread_id=thread_id if enable_hitl else None,
+            max_attempts=retry_settings.get('max_attempts', 3),
+            base_delay_seconds=retry_settings.get('base_delay_seconds', 1.5),
         )
     except Exception as exc:
         logger.exception("DeepAgents invocation failed for run %s", run_id)
