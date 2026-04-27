@@ -99,12 +99,34 @@ def _goal_groups(goal: str) -> list[str]:
     return groups
 
 
+def _goal_requests_tests(lower_goal: str) -> bool:
+    return any(token in lower_goal for token in (' test', ' tests', 'spec', 'coverage', 'unit test', 'integration test'))
+
+
+
+def _goal_requests_docs(lower_goal: str) -> bool:
+    return any(token in lower_goal for token in ('readme', 'docs', 'documentation', 'guide'))
+
+
+
+def _goal_requests_config(lower_goal: str) -> bool:
+    return any(token in lower_goal for token in ('setting', 'settings', 'config', 'configuration', 'provider', 'model'))
+
+
+
 def _score_file(goal: str, path: str) -> int:
     lower_goal = goal.lower()
     lower_path = path.lower()
     score = 0
     name = Path(path).name.lower()
     stem = Path(path).stem.lower()
+    is_test_path = any(marker in lower_path for marker in ('test', 'spec', '__tests__'))
+    is_docs_path = lower_path.endswith('readme.md') or '/docs/' in lower_path or lower_path.endswith('.md')
+    is_config_path = any(token in lower_path for token in ('config', 'settings', 'provider', 'model'))
+    requests_tests = _goal_requests_tests(lower_goal)
+    requests_docs = _goal_requests_docs(lower_goal)
+    requests_config = _goal_requests_config(lower_goal)
+
     if name and name in lower_goal:
         score += 8
     elif stem and stem in lower_goal:
@@ -122,10 +144,24 @@ def _score_file(goal: str, path: str) -> int:
         score += 2
     if ('frontend' in lower_goal or 'ui' in lower_goal or 'page' in lower_goal) and lower_path.startswith('frontend/'):
         score += 2
+
+    if is_test_path:
+        score += 3 if requests_tests else -4
+    if is_docs_path:
+        score += 2 if requests_docs else -3
+    if is_config_path:
+        score += 2 if requests_config else -2
+    if not (is_test_path or is_docs_path or is_config_path):
+        score += 3
+
     return score
 
 
-def expand_companion_files(targets: list[str], files: list[str]) -> list[str]:
+def expand_companion_files(targets: list[str], files: list[str], goal: str = '') -> list[str]:
+    lower_goal = goal.lower()
+    requests_tests = _goal_requests_tests(lower_goal)
+    requests_docs = _goal_requests_docs(lower_goal)
+    requests_config = _goal_requests_config(lower_goal)
     expanded: list[str] = []
     for target in targets:
         if target not in expanded:
@@ -142,9 +178,9 @@ def expand_companion_files(targets: list[str], files: list[str]) -> list[str]:
                 expanded.append(candidate)
             elif target.startswith('backend/') and candidate_lower.startswith('frontend/') and ('settings' in target_lower and 'settings' in candidate_lower):
                 expanded.append(candidate)
-            elif any(marker in candidate_lower for marker in ('test', 'spec', '__tests__')) and target_root and target_root in candidate_lower:
+            elif requests_tests and any(marker in candidate_lower for marker in ('test', 'spec', '__tests__')) and target_root and target_root in candidate_lower:
                 expanded.append(candidate)
-            elif candidate_lower.endswith('readme.md') or '/docs/' in candidate_lower:
+            elif requests_docs and (candidate_lower.endswith('readme.md') or '/docs/' in candidate_lower):
                 if any(keyword in target_lower for keyword in ('settings', 'prompt', 'docker', 'api', 'component')):
                     expanded.append(candidate)
             elif target_name and target_name in candidate_lower:
@@ -170,14 +206,14 @@ def infer_targets_from_repo(goal: str, files: list[str]) -> list[str]:
     for _, candidate in scored[:8]:
         if candidate not in inferred:
             inferred.append(candidate)
-    if ('config' in lower or 'setting' in lower):
+    if _goal_requests_config(lower):
         for candidate in files:
             if candidate.endswith(tuple(EDITABLE_SUFFIXES)) and any(token in candidate.lower() for token in ('config', 'settings', 'provider', 'model', 'package')):
                 if candidate not in inferred:
                     inferred.append(candidate)
-    if ('readme' in lower or 'docs' in lower) and 'README.md' in files and 'README.md' not in inferred:
+    if _goal_requests_docs(lower) and 'README.md' in files and 'README.md' not in inferred:
         inferred.append('README.md')
-    return expand_companion_files(inferred, files)
+    return expand_companion_files(inferred, files, goal)
 
 
 def build_search_context(goal: str, files: list[str], grep_output: str) -> dict:
