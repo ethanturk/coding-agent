@@ -98,6 +98,53 @@ def test_override_block_rejects_when_not_allowed():
         raise AssertionError('Expected HTTPException for disallowed override')
 
 
+def test_approve_cleanup_expands_wildcard_matches(monkeypatch):
+    approval = SimpleNamespace(
+        id='apr_cleanup',
+        run_id='run_cleanup',
+        requested_payload_json={
+            'mode': 'filesystem_cleanup',
+            'operations': [
+                {'type': 'delete_path', 'path': '**/.idea/', 'matches': ['apps/web/.idea', 'packages/api/.idea']},
+            ],
+        },
+        response_payload_json=None,
+        approval_type='governance',
+        status=ApprovalStatus.PENDING,
+        created_at=datetime.now(timezone.utc),
+    )
+    run = SimpleNamespace(id='run_cleanup', current_step_id='step_cleanup', status=RunStatus.WAITING_FOR_HUMAN, final_summary='waiting')
+    env = SimpleNamespace(container_id='ctr_1', repo_dir='/workspace/repo')
+    db = FakeDb(approval, run)
+
+    calls = []
+
+    def fake_exec_in_container(env_obj, command):
+        calls.append(command)
+        return {'ok': True}
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(approvals_api, 'exec_in_container', fake_exec_in_container)
+    monkeypatch.setattr(approvals_api, 'get_latest_env', lambda db_obj, run_id: env)
+    monkeypatch.setattr(approvals_api.threading, 'Thread', FakeThread)
+
+    result = approvals_api.approve('apr_cleanup', db)
+
+    assert approval.status == ApprovalStatus.APPROVED
+    assert result['cleanup_applied'] is True
+    assert result['deleted_matches'] == ['apps/web/.idea', 'packages/api/.idea']
+    assert calls == [
+        "cd /workspace/repo && rm -rf -- 'apps/web/.idea'",
+        "cd /workspace/repo && rm -rf -- 'packages/api/.idea'",
+    ]
+
+
 def test_list_approvals_backfills_override_for_pending_plan_and_review():
     plan = SimpleNamespace(
         id='apr_plan',

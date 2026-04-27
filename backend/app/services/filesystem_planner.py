@@ -1,3 +1,4 @@
+import fnmatch
 import re
 from collections.abc import Iterable
 
@@ -65,8 +66,20 @@ def classify_goal_mode(goal: str) -> dict:
     return {'mode': 'code_edit', 'paths': [], 'constraints': {}}
 
 
-def _matching_repo_entries(repo_files: Iterable[str], norm: str) -> list[str]:
-    return [p for p in repo_files if p == norm or p.startswith(norm + '/')]
+def _matching_repo_entries(repo_files: Iterable[str], pattern: str) -> list[str]:
+    normalized_pattern = pattern.rstrip('/')
+    matched_dirs: list[str] = []
+    for repo_path in repo_files:
+        parts = [part for part in repo_path.split('/') if part]
+        for idx in range(1, len(parts) + 1):
+            candidate = '/'.join(parts[:idx])
+            candidate_dir = candidate + '/'
+            if fnmatch.fnmatch(candidate_dir, pattern) or fnmatch.fnmatch(candidate, normalized_pattern):
+                if candidate not in matched_dirs:
+                    matched_dirs.append(candidate)
+    if matched_dirs:
+        return sorted(matched_dirs)
+    return [p for p in repo_files if p == normalized_pattern or p.startswith(normalized_pattern + '/')]
 
 
 def build_filesystem_cleanup_plan(goal: str, repo_files: list[str]) -> dict:
@@ -85,7 +98,7 @@ def build_filesystem_cleanup_plan(goal: str, repo_files: list[str]) -> dict:
         if prefixes:
             matched.append(raw)
             matched_entries[raw] = prefixes
-            operations.append({'type': 'delete_path', 'path': raw})
+            operations.append({'type': 'delete_path', 'path': raw, 'matches': prefixes})
         else:
             unmatched.append(raw)
     verification = ['git status --short'] if classified['constraints'].get('verify_git_status') else []

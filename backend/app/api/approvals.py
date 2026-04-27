@@ -104,18 +104,23 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
 
     if cleanup_mode == 'filesystem_cleanup' and cleanup_ops and run and env and env.container_id:
         applied_paths = []
+        deleted_matches = []
         for op in cleanup_ops:
             if op.get('type') != 'delete_path':
                 continue
-            rel_path = op['path'].rstrip('/')
-            result = exec_in_container(env, f"cd {env.repo_dir} && rm -rf -- '{rel_path}'")
-            if not result['ok']:
-                raise HTTPException(status_code=400, detail=result.get('stderr') or f"Failed to delete approved path {rel_path}")
+            matches = [match.rstrip('/') for match in (op.get('matches') or []) if match]
+            if not matches:
+                continue
+            for rel_path in matches:
+                result = exec_in_container(env, f"cd {env.repo_dir} && rm -rf -- '{rel_path}'")
+                if not result['ok']:
+                    raise HTTPException(status_code=400, detail=result.get('stderr') or f"Failed to delete approved path {rel_path}")
+                deleted_matches.append(rel_path)
             applied_paths.append(op['path'])
-            db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='filesystem.path_deleted', payload_json={'path': op['path']}))
+            db.add(Event(id=_id('evt'), run_id=run.id, step_id=run.current_step_id, event_type='filesystem.path_deleted', payload_json={'path': op['path'], 'matches': matches}))
         db.add(Artifact(id=_id('art'), run_id=run.id, step_id=run.current_step_id, artifact_type=ArtifactType.LOG, name='filesystem-cleanup.log', storage_uri=f"container://{env.container_id}/{env.repo_dir}", summary='Applied approved filesystem cleanup'))
-        _resume_run(run, db, summary='Approved filesystem cleanup resumed', event_type='run.resumed', payload={'reason': 'approved_filesystem_cleanup', 'paths': applied_paths})
-        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "cleanup_applied": True, "paths": applied_paths}
+        _resume_run(run, db, summary='Approved filesystem cleanup resumed', event_type='run.resumed', payload={'reason': 'approved_filesystem_cleanup', 'paths': applied_paths, 'deleted_matches': deleted_matches})
+        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "cleanup_applied": True, "paths": applied_paths, "deleted_matches": deleted_matches}
 
     if proposal_items and run and env and env.container_id:
         applied_paths = []
