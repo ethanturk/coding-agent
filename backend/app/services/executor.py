@@ -323,7 +323,7 @@ def _build_plan_for_run(db: Session, env, goal: str) -> tuple[dict, dict]:
     if not repo_result.get('ok'):
         raise ValueError(repo_result.get('stderr') or 'Failed to inspect repository files for planning')
     repo_files = collect_repo_files(repo_result.get('stdout') or '')
-    draft_plan = build_initial_plan(goal, repo_files)
+    draft_plan = build_initial_plan(goal, repo_files, settings=settings)
     enriched = enrich_plan_if_possible(db, goal, repo_files, draft_plan)
     return enriched['plan'], enriched.get('enrichment') or {'used': False, 'reason': 'not_available'}
 

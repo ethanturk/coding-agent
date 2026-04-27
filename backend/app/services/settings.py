@@ -20,6 +20,7 @@ DEFAULT_SETTINGS = {
         'auto_approve_threshold': 0.8,
         'max_review_iterations': 2,
         'require_human_for_pr_merge': True,
+        'plan_target_cap': 12,
         'model_retries': {
             'max_attempts': 3,
             'base_delay_seconds': 1.5,

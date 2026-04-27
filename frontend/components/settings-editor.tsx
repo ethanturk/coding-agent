@@ -20,6 +20,7 @@ export function SettingsEditor({ initial }: { initial: any }) {
       auto_approve_threshold: 0.8,
       max_review_iterations: 2,
       require_human_for_pr_merge: true,
+      plan_target_cap: 12,
       model_retries: {
         max_attempts: 3,
         base_delay_seconds: 1.5,
@@ -177,6 +178,19 @@ export function SettingsEditor({ initial }: { initial: any }) {
           value={settings.autonomy?.max_review_iterations ?? 2}
           onChange={(e) => patch(['autonomy', 'max_review_iterations'], Number(e.target.value))}
           style={{ width: 80 }}
+        />
+      </div>
+      <div className="card">
+        <label style={{ display: 'block', marginBottom: 8 }}>
+          <span style={{ fontWeight: 700 }}>Plan target cap</span>
+        </label>
+        <input
+          type="number"
+          min="1"
+          max="200"
+          value={settings.autonomy?.plan_target_cap ?? 12}
+          onChange={(e) => patch(['autonomy', 'plan_target_cap'], Number(e.target.value || 12))}
+          style={{ width: 100 }}
         />
       </div>
       <div className="card">

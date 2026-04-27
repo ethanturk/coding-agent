@@ -3,7 +3,9 @@ from app.services import executor as executor_api
 
 
 def test_default_settings_include_model_retry_controls():
-    retries = DEFAULT_SETTINGS['autonomy']['model_retries']
+    autonomy = DEFAULT_SETTINGS['autonomy']
+    assert autonomy['plan_target_cap'] == 12
+    retries = autonomy['model_retries']
     assert retries['max_attempts'] == 3
     assert retries['base_delay_seconds'] == 1.5
     assert retries['max_delay_seconds'] == 10.0

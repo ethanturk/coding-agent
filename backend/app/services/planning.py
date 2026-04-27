@@ -7,19 +7,25 @@ from app.services.filesystem_planner import build_filesystem_cleanup_plan, class
 from app.services.llm_planner import enrich_edit_plan
 
 
-PLAN_LIMIT = 12
+def resolve_plan_limit(settings: dict | None) -> int:
+    value = ((settings or {}).get('autonomy') or {}).get('plan_target_cap', 12)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 12
 
 
 def collect_repo_files(repo_listing: str) -> list[str]:
     return [line.strip() for line in (repo_listing or '').splitlines() if line.strip()]
 
 
-def build_initial_plan(goal: str, repo_files: list[str], search_context: dict | None = None) -> dict:
+def build_initial_plan(goal: str, repo_files: list[str], search_context: dict | None = None, settings: dict | None = None) -> dict:
     goal_mode = classify_goal_mode(goal)
     if goal_mode.get('mode') == 'filesystem_cleanup':
         return build_filesystem_cleanup_plan(goal, repo_files)
 
-    targets = infer_targets_from_repo(goal, repo_files)[:PLAN_LIMIT]
+    plan_limit = resolve_plan_limit(settings)
+    targets = infer_targets_from_repo(goal, repo_files)[:plan_limit]
     search_terms = search_terms_from_goal(goal)
     search_context = search_context or {}
     plan_targets = []
@@ -42,8 +48,8 @@ def build_initial_plan(goal: str, repo_files: list[str], search_context: dict | 
     risks = []
     if not plan_targets:
         risks.append('No relevant files were inferred from the repository listing.')
-    if len(plan_targets) >= PLAN_LIMIT:
-        risks.append('Plan reached the target cap; relevant files may have been truncated.')
+    if len(plan_targets) >= plan_limit:
+        risks.append(f'Plan reached the target cap ({plan_limit}); relevant files may have been truncated.')
     if search_context.get('related_files'):
         risks.append('Related files exist outside the primary target set and may require explicit approval if scope expands.')
     return {
