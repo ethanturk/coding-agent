@@ -155,6 +155,7 @@ def _complete_filesystem_cleanup(db: Session, run: Run, planning_step: Step, env
         output_json={'decision': 'approved', 'summary': 'Filesystem cleanup executed deterministically from approved plan.'},
     )
     db.add(review_step)
+    db.flush()
     run.status = RunStatus.COMPLETED
     run.current_step_id = review_step.id
     run.final_summary = f"Cleanup completed: removed {len(deleted_matches)} matched path(s)"
