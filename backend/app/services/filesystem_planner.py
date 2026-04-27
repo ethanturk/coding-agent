@@ -66,15 +66,24 @@ def classify_goal_mode(goal: str) -> dict:
     return {'mode': 'code_edit', 'paths': [], 'constraints': {}}
 
 
+def _pattern_variants(pattern: str) -> list[str]:
+    variants = [pattern]
+    if pattern.startswith('**/'):
+        variants.append(pattern[3:])
+    return variants
+
+
 def _matching_repo_entries(repo_files: Iterable[str], pattern: str) -> list[str]:
     normalized_pattern = pattern.rstrip('/')
+    normalized_variants = [variant.rstrip('/') for variant in _pattern_variants(pattern)]
+    dir_variants = [variant if variant.endswith('/') else variant + '/' for variant in _pattern_variants(pattern)]
     matched_dirs: list[str] = []
     for repo_path in repo_files:
         parts = [part for part in repo_path.split('/') if part]
         for idx in range(1, len(parts) + 1):
             candidate = '/'.join(parts[:idx])
             candidate_dir = candidate + '/'
-            if fnmatch.fnmatch(candidate_dir, pattern) or fnmatch.fnmatch(candidate, normalized_pattern):
+            if any(fnmatch.fnmatch(candidate_dir, variant) for variant in dir_variants) or any(fnmatch.fnmatch(candidate, variant) for variant in normalized_variants):
                 if candidate not in matched_dirs:
                     matched_dirs.append(candidate)
     if matched_dirs:
@@ -85,13 +94,15 @@ def _matching_repo_entries(repo_files: Iterable[str], pattern: str) -> list[str]
 def build_filesystem_cleanup_plan(goal: str, repo_files: list[str]) -> dict:
     classified = classify_goal_mode(goal)
     raw_paths = classified.get('paths', [])
-    normalized_files = [p.strip('./') for p in repo_files]
+    normalized_files = [p[2:] if p.startswith('./') else p for p in repo_files]
     operations = []
     matched = []
     unmatched = []
     matched_entries: dict[str, list[str]] = {}
     for raw in raw_paths:
-        norm = raw.rstrip('/').strip('./')
+        norm = raw.rstrip('/')
+        if norm.startswith('./'):
+            norm = norm[2:]
         if not norm:
             continue
         prefixes = _matching_repo_entries(normalized_files, norm)
