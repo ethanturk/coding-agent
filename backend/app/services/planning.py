@@ -58,6 +58,15 @@ def build_initial_plan(goal: str, repo_files: list[str], search_context: dict | 
 
 
 def enrich_plan_if_possible(db, goal: str, repo_files: list[str], draft_plan: dict) -> dict:
+    if draft_plan.get('mode') == 'filesystem_cleanup':
+        return {
+            'plan': draft_plan,
+            'enrichment': {
+                'used': False,
+                'reason': 'filesystem_cleanup_bypasses_edit_enrichment',
+            },
+        }
+
     search_context = {
         'file_count': len(repo_files),
         'related_files': [target.get('path') for target in draft_plan.get('targets', [])],
