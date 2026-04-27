@@ -49,14 +49,15 @@ def detect_targets_from_goal(goal: str) -> list[str]:
 
 
 def search_terms_from_goal(goal: str) -> list[str]:
-    words = re.findall(r'[A-Za-z0-9_./-]+', goal.lower())
+    raw_words = re.findall(r'[A-Za-z0-9_./-]+', goal.lower())
     terms: list[str] = []
-    for word in words:
-        if len(word) < 3 or word in STOP_WORDS:
-            continue
-        if word not in terms:
-            terms.append(word)
-    return terms[:8]
+    for raw_word in raw_words:
+        for word in re.split(r'[^a-z0-9_]+', raw_word):
+            if len(word) < 3 or word in STOP_WORDS:
+                continue
+            if word not in terms:
+                terms.append(word)
+    return terms[:12]
 
 
 def extract_symbol_candidates(text: str) -> list[str]:
@@ -117,6 +118,7 @@ def _goal_requests_config(lower_goal: str) -> bool:
 def _score_file(goal: str, path: str) -> int:
     lower_goal = goal.lower()
     lower_path = path.lower()
+    goal_terms = search_terms_from_goal(goal)
     score = 0
     name = Path(path).name.lower()
     stem = Path(path).stem.lower()
@@ -131,6 +133,13 @@ def _score_file(goal: str, path: str) -> int:
         score += 8
     elif stem and stem in lower_goal:
         score += 5
+    for term in goal_terms:
+        if term == stem:
+            score += 8
+        elif term in stem:
+            score += 5
+        elif term in lower_path:
+            score += 2
     for keyword, hints in KEYWORD_PATH_HINTS.items():
         if keyword in lower_goal:
             for hint in hints:
@@ -144,6 +153,9 @@ def _score_file(goal: str, path: str) -> int:
         score += 2
     if ('frontend' in lower_goal or 'ui' in lower_goal or 'page' in lower_goal) and lower_path.startswith('frontend/'):
         score += 2
+    if any(term in ('cli', 'program', 'output', 'result', 'results', 'markdown', 'reviewoutput') for term in goal_terms):
+        if any(term in lower_path for term in ('program', 'output', 'result', 'markdown', 'review')):
+            score += 4
 
     if is_test_path:
         score += 3 if requests_tests else -4
