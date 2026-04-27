@@ -76,5 +76,7 @@ def test_complete_filesystem_cleanup_runs_without_deepagents(monkeypatch):
         "cd /workspace/repo && rm -rf -- 'openspec'",
         "cd /workspace/repo && git status --short",
         "cd /workspace/repo && git add -A",
+        "cd /workspace/repo && git config user.name 'OpenClaw Agent'",
+        "cd /workspace/repo && git config user.email 'openclaw-agent@local'",
         "cd /workspace/repo && git commit -m 'Remove IDE and temporary configuration folders'",
     ]

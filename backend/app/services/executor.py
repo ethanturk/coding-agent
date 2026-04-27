@@ -120,6 +120,8 @@ def _complete_filesystem_cleanup(db: Session, run: Run, planning_step: Step, env
 
     commit_output = None
     if commit_cfg.get('enabled') and deleted_matches:
+        exec_in_container(env, f"cd {env.repo_dir} && git config user.name 'OpenClaw Agent'")
+        exec_in_container(env, f"cd {env.repo_dir} && git config user.email 'openclaw-agent@local'")
         message = (commit_cfg.get('message') or '').replace("'", "'\\''")
         commit_result = exec_in_container(env, f"cd {env.repo_dir} && git commit -m '{message}'")
         if not commit_result.get('ok'):
