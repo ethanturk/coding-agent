@@ -788,6 +788,12 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         scope_control=scope_control,
     )
     auto_approve = _should_auto_approve(settings, agent_result, scope_guard=scope_guard)
+    blocking_issues = agent_result.get("blocking_issues", [])
+    requires_human_review = (
+        agent_result.get("status") == "needs_human_review"
+        or bool(blocking_issues)
+        or agent_result.get("review_decision") == "request_changes"
+    )
 
     if agent_result.get("status") == "failed":
         # Agent reported failure
@@ -802,8 +808,8 @@ def execute_run(db: Session, run_id: str) -> Run | None:
                 payload_json={"reason": "agent_failure", "result": agent_result},
             )
         )
-    elif not files_changed and not diff_content.strip():
-        # No changes made
+    elif not files_changed and not diff_content.strip() and not requires_human_review:
+        # No changes made, and no human review is required
         run.status = RunStatus.COMPLETED
         run.final_summary = agent_result.get("plan_summary") or "No file changes needed"
         db.add(
@@ -837,7 +843,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             )
         )
     else:
-        # Below threshold or reviewer requested changes → human approval
+        # Below threshold, scope blocked, or reviewer requested changes → human approval
         approval = Approval(
             id=_id("apr"),
             run_id=run.id,
