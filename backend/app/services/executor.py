@@ -801,10 +801,10 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             )
         )
     elif auto_approve:
-        # High confidence + reviewer approved → auto-complete
-        run.status = RunStatus.COMPLETED
+        # High confidence + reviewer approved → implementation complete, awaiting publish/PR
+        run.status = RunStatus.WAITING_FOR_HUMAN
         run.final_summary = (
-            f"Auto-approved: {len(files_changed)} file(s) changed "
+            f"Ready to publish: {len(files_changed)} file(s) changed "
             f"(confidence: {agent_result.get('confidence', 0.0):.0%})"
         )
         db.add(
@@ -812,9 +812,9 @@ def execute_run(db: Session, run_id: str) -> Run | None:
                 id=_id("evt"),
                 run_id=run.id,
                 step_id=review_step.id,
-                event_type="run.completed",
+                event_type="run.awaiting_pull_request",
                 payload_json={
-                    "reason": "auto_approved",
+                    "reason": "auto_approved_waiting_for_pr",
                     "confidence": agent_result.get("confidence"),
                     "files_changed": files_changed,
                     "scope_guard": scope_guard,
