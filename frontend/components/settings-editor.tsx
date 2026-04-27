@@ -6,6 +6,58 @@ import { ProviderModelSelector } from './provider-model-selector';
 
 const providers = ['openai', 'openai_compatible', 'z_ai_coding'];
 
+function SectionCard({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+  return (
+    <section className="card" style={{ display: 'grid', gap: 14, padding: 18 }}>
+      <div>
+        <h2 className="section-title" style={{ marginBottom: 4 }}>{title}</h2>
+        {description ? <p className="page-subtitle" style={{ margin: 0 }}>{description}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ControlGrid({ children, min = 220 }: { children: React.ReactNode; min?: number }) {
+  return (
+    <div style={{ display: 'grid', gap: 14, gridTemplateColumns: `repeat(auto-fit, minmax(${min}px, 1fr))`, alignItems: 'start' }}>
+      {children}
+    </div>
+  );
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'grid', gap: 6, alignContent: 'start' }}>
+      <span style={{ fontWeight: 700 }}>{label}</span>
+      {hint ? <span style={{ fontSize: '0.85em', opacity: 0.72, lineHeight: 1.35 }}>{hint}</span> : null}
+      {children}
+    </label>
+  );
+}
+
+function ToggleCard({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto 1fr',
+        gap: 12,
+        alignItems: 'start',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 12,
+        padding: 14,
+      }}
+    >
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ marginTop: 2 }} />
+      <span style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontWeight: 700, lineHeight: 1.3 }}>{label}</span>
+        {hint ? <span style={{ fontSize: '0.85em', opacity: 0.72, lineHeight: 1.35 }}>{hint}</span> : null}
+      </span>
+    </label>
+  );
+}
+
 export function SettingsEditor({ initial }: { initial: any }) {
   const fallback = {
     default: { provider: '', model: '' },
@@ -101,185 +153,210 @@ export function SettingsEditor({ initial }: { initial: any }) {
   }
 
   return (
-    <div className="grid">
-      <div className="badge">Settings status: {status}</div>
+    <div className="grid" style={{ gap: 18, maxWidth: 1200 }}>
+      <div className="badge" style={{ width: 'fit-content' }}>Settings status: {status}</div>
 
-      <h2 className="section-title">Default Model</h2>
-      <ProviderModelSelector
-        providerName="default_provider"
-        modelName="default_model"
-        value={settings.default}
-        providersConfig={settings.providers}
-        allowBlankProvider={false}
-        onChange={(value) => { patch(['default', 'provider'], value.provider); patch(['default', 'model'], value.model); }}
-      />
-      <input value={settings.prompting?.max_prompt_length || 1000} onChange={(e) => patch(['prompting', 'max_prompt_length'], Number(e.target.value || 1000))} placeholder="1000" type="number" />
+      <SectionCard title="Default Model" description="Choose the default provider/model pair and the max prompt size used across planning flows.">
+        <ControlGrid min={260}>
+          <Field label="Default provider and model">
+            <ProviderModelSelector
+              providerName="default_provider"
+              modelName="default_model"
+              value={settings.default}
+              providersConfig={settings.providers}
+              allowBlankProvider={false}
+              onChange={(value) => { patch(['default', 'provider'], value.provider); patch(['default', 'model'], value.model); }}
+            />
+          </Field>
+          <Field label="Max prompt length" hint="Upper bound for prompt content sent into planning/model calls.">
+            <input
+              value={settings.prompting?.max_prompt_length || 1000}
+              onChange={(e) => patch(['prompting', 'max_prompt_length'], Number(e.target.value || 1000))}
+              placeholder="1000"
+              type="number"
+            />
+          </Field>
+        </ControlGrid>
+      </SectionCard>
 
-      <h2 className="section-title">OpenAI</h2>
-      <input value={settings.providers.openai.api_key || ''} onChange={(e) => patch(['providers', 'openai', 'api_key'], e.target.value)} placeholder="OpenAI API key" />
-      <input value={settings.providers.openai.base_url || ''} onChange={(e) => patch(['providers', 'openai', 'base_url'], e.target.value)} placeholder="https://api.openai.com/v1" />
-      <input value={settings.providers.openai.organization || ''} onChange={(e) => patch(['providers', 'openai', 'organization'], e.target.value)} placeholder="Organization (optional)" />
-      <input value={settings.providers.openai.project || ''} onChange={(e) => patch(['providers', 'openai', 'project'], e.target.value)} placeholder="Project (optional)" />
-      <ModelListEditor initial={settings.providers.openai.models || []} onChange={(items) => patch(['providers', 'openai', 'models'], items)} />
+      {providers.map((providerKey) => {
+        const titles: Record<string, string> = {
+          openai: 'OpenAI',
+          openai_compatible: 'OpenAI Compatible',
+          z_ai_coding: 'Z.AI Coding',
+        };
+        const config = settings.providers[providerKey as keyof typeof settings.providers];
+        return (
+          <SectionCard key={providerKey} title={titles[providerKey]} description="Provider credentials, endpoint configuration, and available models.">
+            <ControlGrid min={260}>
+              <Field label="API key">
+                <input value={config.api_key || ''} onChange={(e) => patch(['providers', providerKey, 'api_key'], e.target.value)} placeholder="API key" />
+              </Field>
+              <Field label="Base URL">
+                <input
+                  value={config.base_url || ''}
+                  onChange={(e) => patch(['providers', providerKey, 'base_url'], e.target.value)}
+                  placeholder={providerKey === 'openai' ? 'https://api.openai.com/v1' : providerKey === 'z_ai_coding' ? 'https://api.z.ai/api/coding/paas/v4' : 'https://provider.example/v1'}
+                />
+              </Field>
+              {providerKey === 'openai' ? (
+                <>
+                  <Field label="Organization">
+                    <input value={config.organization || ''} onChange={(e) => patch(['providers', providerKey, 'organization'], e.target.value)} placeholder="Organization (optional)" />
+                  </Field>
+                  <Field label="Project">
+                    <input value={config.project || ''} onChange={(e) => patch(['providers', providerKey, 'project'], e.target.value)} placeholder="Project (optional)" />
+                  </Field>
+                </>
+              ) : null}
+            </ControlGrid>
+            <Field label="Available models" hint="These populate the model dropdowns throughout the app.">
+              <ModelListEditor initial={config.models || []} onChange={(items) => patch(['providers', providerKey, 'models'], items)} />
+            </Field>
+          </SectionCard>
+        );
+      })}
 
-      <h2 className="section-title">OpenAI Compatible</h2>
-      <input value={settings.providers.openai_compatible.api_key || ''} onChange={(e) => patch(['providers', 'openai_compatible', 'api_key'], e.target.value)} placeholder="Compatible API key" />
-      <input value={settings.providers.openai_compatible.base_url || ''} onChange={(e) => patch(['providers', 'openai_compatible', 'base_url'], e.target.value)} placeholder="https://provider.example/v1" />
-      <ModelListEditor initial={settings.providers.openai_compatible.models || []} onChange={(items) => patch(['providers', 'openai_compatible', 'models'], items)} />
+      <SectionCard title="Per-Role Overrides" description="Override the default model for specific orchestration roles.">
+        <ControlGrid min={260}>
+          {['orchestrator', 'planner', 'developer', 'tester', 'reviewer', 'reporter'].map((role) => (
+            <div key={role} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
+              <div style={{ fontWeight: 700, textTransform: 'capitalize' }}>{role}</div>
+              <ProviderModelSelector
+                providerName={`${role}_provider`}
+                modelName={`${role}_model`}
+                value={settings.roles?.[role]}
+                providersConfig={settings.providers}
+                onChange={(value) => { patch(['roles', role, 'provider'], value.provider); patch(['roles', role, 'model'], value.model); }}
+              />
+            </div>
+          ))}
+        </ControlGrid>
+      </SectionCard>
 
-      <h2 className="section-title">Z.AI Coding</h2>
-      <input value={settings.providers.z_ai_coding.api_key || ''} onChange={(e) => patch(['providers', 'z_ai_coding', 'api_key'], e.target.value)} placeholder="Z.AI API key" />
-      <input value={settings.providers.z_ai_coding.base_url || ''} onChange={(e) => patch(['providers', 'z_ai_coding', 'base_url'], e.target.value)} placeholder="https://api.z.ai/api/coding/paas/v4" />
-      <ModelListEditor initial={settings.providers.z_ai_coding.models || []} onChange={(items) => patch(['providers', 'z_ai_coding', 'models'], items)} />
-
-      <h2 className="section-title">Per-Role Overrides</h2>
-      {['orchestrator','planner','developer','tester','reviewer','reporter'].map((role) => (
-        <div key={role} className="card">
-          <div style={{ marginBottom: 8, fontWeight: 700, textTransform: 'capitalize' }}>{role}</div>
-          <ProviderModelSelector
-            providerName={`${role}_provider`}
-            modelName={`${role}_model`}
-            value={settings.roles?.[role]}
-            providersConfig={settings.providers}
-            onChange={(value) => { patch(['roles', role, 'provider'], value.provider); patch(['roles', role, 'model'], value.model); }}
-          />
-        </div>
-      ))}
-
-      <h2 className="section-title">Autonomy</h2>
-      <div className="card">
-        <label style={{ display: 'block', marginBottom: 8 }}>
-          <span style={{ fontWeight: 700 }}>Auto-approve threshold</span>
-          <span style={{ marginLeft: 8, opacity: 0.7 }}>
-            {((settings.autonomy?.auto_approve_threshold ?? 0.8) * 100).toFixed(0)}%
-          </span>
-        </label>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="5"
-          value={(settings.autonomy?.auto_approve_threshold ?? 0.8) * 100}
-          onChange={(e) => patch(['autonomy', 'auto_approve_threshold'], Number(e.target.value) / 100)}
-          style={{ width: '100%' }}
-        />
-        <p style={{ fontSize: '0.85em', opacity: 0.7, marginTop: 4 }}>
-          Changes with confidence above this threshold auto-apply, but scope guardrails can still force human review.
-        </p>
-      </div>
-      <div className="card">
-        <label style={{ display: 'block', marginBottom: 8 }}>
-          <span style={{ fontWeight: 700 }}>Max review iterations</span>
-        </label>
-        <input
-          type="number"
-          min="0"
-          max="5"
-          value={settings.autonomy?.max_review_iterations ?? 2}
-          onChange={(e) => patch(['autonomy', 'max_review_iterations'], Number(e.target.value))}
-          style={{ width: 80 }}
-        />
-      </div>
-      <div className="card">
-        <label style={{ display: 'block', marginBottom: 8 }}>
-          <span style={{ fontWeight: 700 }}>Plan target cap</span>
-        </label>
-        <input
-          type="number"
-          min="1"
-          max="200"
-          value={settings.autonomy?.plan_target_cap ?? 12}
-          onChange={(e) => patch(['autonomy', 'plan_target_cap'], Number(e.target.value || 12))}
-          style={{ width: 100 }}
-        />
-      </div>
-      <div className="card">
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <SectionCard title="Autonomy" description="Confidence thresholds, planner sizing, merge policy, and retry behavior.">
+        <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700 }}>Auto-approve threshold</span>
+            <span style={{ opacity: 0.72 }}>{((settings.autonomy?.auto_approve_threshold ?? 0.8) * 100).toFixed(0)}%</span>
+          </label>
           <input
-            type="checkbox"
-            checked={settings.autonomy?.require_human_for_pr_merge ?? true}
-            onChange={(e) => patch(['autonomy', 'require_human_for_pr_merge'], e.target.checked)}
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={(settings.autonomy?.auto_approve_threshold ?? 0.8) * 100}
+            onChange={(e) => patch(['autonomy', 'auto_approve_threshold'], Number(e.target.value) / 100)}
+            style={{ width: '100%' }}
           />
-          <span style={{ fontWeight: 700 }}>Require human approval for PR merge</span>
-        </label>
-      </div>
-      <div className="card">
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, minmax(140px, 220px))' }}>
-          <label>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Model retry attempts</div>
+          <p style={{ fontSize: '0.85em', opacity: 0.72, margin: 0 }}>
+            Changes with confidence above this threshold auto-apply, but scope guardrails can still force human review.
+          </p>
+        </div>
+
+        <ControlGrid min={220}>
+          <Field label="Max review iterations">
+            <input
+              type="number"
+              min="0"
+              max="5"
+              value={settings.autonomy?.max_review_iterations ?? 2}
+              onChange={(e) => patch(['autonomy', 'max_review_iterations'], Number(e.target.value))}
+            />
+          </Field>
+          <Field label="Plan target cap" hint="Maximum number of inferred target files kept in the initial plan.">
             <input
               type="number"
               min="1"
-              max="10"
-              value={settings.autonomy?.model_retries?.max_attempts ?? 3}
-              onChange={(e) => patch(['autonomy', 'model_retries', 'max_attempts'], Number(e.target.value || 3))}
+              max="200"
+              value={settings.autonomy?.plan_target_cap ?? 12}
+              onChange={(e) => patch(['autonomy', 'plan_target_cap'], Number(e.target.value || 12))}
             />
-          </label>
-          <label>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Retry base delay (seconds)</div>
-            <input
-              type="number"
-              min="0"
-              max="30"
-              step="0.5"
-              value={settings.autonomy?.model_retries?.base_delay_seconds ?? 1.5}
-              onChange={(e) => patch(['autonomy', 'model_retries', 'base_delay_seconds'], Number(e.target.value || 1.5))}
-            />
-          </label>
-          <label>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Retry max delay (seconds)</div>
-            <input
-              type="number"
-              min="0"
-              max="120"
-              step="0.5"
-              value={settings.autonomy?.model_retries?.max_delay_seconds ?? 10}
-              onChange={(e) => patch(['autonomy', 'model_retries', 'max_delay_seconds'], Number(e.target.value || 10))}
-            />
-          </label>
-          <label>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Retry jitter ratio</div>
-            <input
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              value={settings.autonomy?.model_retries?.jitter_ratio ?? 0.25}
-              onChange={(e) => patch(['autonomy', 'model_retries', 'jitter_ratio'], Number(e.target.value || 0.25))}
-            />
-          </label>
-        </div>
-      </div>
+          </Field>
+        </ControlGrid>
 
-      <h2 className="section-title">Scope Control</h2>
-      <div className="card">
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <input
-            type="checkbox"
+        <ToggleCard
+          label="Require human approval for PR merge"
+          hint="Even when implementation is approved, merging the PR still waits for an explicit human action."
+          checked={settings.autonomy?.require_human_for_pr_merge ?? true}
+          onChange={(checked) => patch(['autonomy', 'require_human_for_pr_merge'], checked)}
+        />
+
+        <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 14, display: 'grid', gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Model retries</div>
+            <div style={{ fontSize: '0.85em', opacity: 0.72, lineHeight: 1.35 }}>
+              Controls transient model retry attempts, pacing, cap, and jitter.
+            </div>
+          </div>
+          <ControlGrid min={200}>
+            <Field label="Retry attempts">
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={settings.autonomy?.model_retries?.max_attempts ?? 3}
+                onChange={(e) => patch(['autonomy', 'model_retries', 'max_attempts'], Number(e.target.value || 3))}
+              />
+            </Field>
+            <Field label="Base delay (seconds)">
+              <input
+                type="number"
+                min="0"
+                max="30"
+                step="0.5"
+                value={settings.autonomy?.model_retries?.base_delay_seconds ?? 1.5}
+                onChange={(e) => patch(['autonomy', 'model_retries', 'base_delay_seconds'], Number(e.target.value || 1.5))}
+              />
+            </Field>
+            <Field label="Max delay (seconds)">
+              <input
+                type="number"
+                min="0"
+                max="120"
+                step="0.5"
+                value={settings.autonomy?.model_retries?.max_delay_seconds ?? 10}
+                onChange={(e) => patch(['autonomy', 'model_retries', 'max_delay_seconds'], Number(e.target.value || 10))}
+              />
+            </Field>
+            <Field label="Jitter ratio">
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                value={settings.autonomy?.model_retries?.jitter_ratio ?? 0.25}
+                onChange={(e) => patch(['autonomy', 'model_retries', 'jitter_ratio'], Number(e.target.value || 0.25))}
+              />
+            </Field>
+          </ControlGrid>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Scope Control" description="Guardrails for planning, write interruption, file expansion, and parallelism.">
+        <ControlGrid min={280}>
+          <ToggleCard
+            label="Require plan approval before implementation"
+            hint="Stops the run after planning so a human can confirm the proposed target set."
             checked={settings.autonomy?.scope_control?.require_plan_approval ?? true}
-            onChange={(e) => patch(['autonomy', 'scope_control', 'require_plan_approval'], e.target.checked)}
+            onChange={(checked) => patch(['autonomy', 'scope_control', 'require_plan_approval'], checked)}
           />
-          <span style={{ fontWeight: 700 }}>Require plan approval before implementation</span>
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <input
-            type="checkbox"
+          <ToggleCard
+            label="Interrupt before write operations"
+            hint="Pauses before writing files when extra review is desired."
             checked={settings.autonomy?.scope_control?.interrupt_before_write ?? true}
-            onChange={(e) => patch(['autonomy', 'scope_control', 'interrupt_before_write'], e.target.checked)}
+            onChange={(checked) => patch(['autonomy', 'scope_control', 'interrupt_before_write'], checked)}
           />
-          <span style={{ fontWeight: 700 }}>Interrupt before write operations</span>
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <input
-            type="checkbox"
+          <ToggleCard
+            label="Allow unplanned file expansion"
+            hint="Permits the agent to touch files outside the approved target set when needed."
             checked={settings.autonomy?.scope_control?.allow_path_expansion ?? false}
-            onChange={(e) => patch(['autonomy', 'scope_control', 'allow_path_expansion'], e.target.checked)}
+            onChange={(checked) => patch(['autonomy', 'scope_control', 'allow_path_expansion'], checked)}
           />
-          <span style={{ fontWeight: 700 }}>Allow unplanned file expansion</span>
-        </label>
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, minmax(140px, 220px))' }}>
-          <label>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Max files changed</div>
+        </ControlGrid>
+
+        <ControlGrid min={220}>
+          <Field label="Max files changed">
             <input
               type="number"
               min="1"
@@ -287,9 +364,8 @@ export function SettingsEditor({ initial }: { initial: any }) {
               value={settings.autonomy?.scope_control?.max_files_changed ?? 3}
               onChange={(e) => patch(['autonomy', 'scope_control', 'max_files_changed'], Number(e.target.value || 3))}
             />
-          </label>
-          <label>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Max parallel developer tasks</div>
+          </Field>
+          <Field label="Max parallel developer tasks">
             <input
               type="number"
               min="1"
@@ -297,9 +373,9 @@ export function SettingsEditor({ initial }: { initial: any }) {
               value={settings.autonomy?.scope_control?.max_parallel_developer_tasks ?? 1}
               onChange={(e) => patch(['autonomy', 'scope_control', 'max_parallel_developer_tasks'], Number(e.target.value || 1))}
             />
-          </label>
-        </div>
-      </div>
+          </Field>
+        </ControlGrid>
+      </SectionCard>
     </div>
   );
 }
