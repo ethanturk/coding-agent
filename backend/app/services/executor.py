@@ -318,7 +318,7 @@ def _should_auto_approve(settings: dict, agent_result: dict, *, scope_guard: dic
     return confidence >= threshold
 
 
-def _build_plan_for_run(db: Session, env, goal: str) -> tuple[dict, dict]:
+def _build_plan_for_run(db: Session, env, goal: str, settings: dict) -> tuple[dict, dict]:
     repo_result = exec_in_container(env, f"cd {env.repo_dir} && git ls-files")
     if not repo_result.get('ok'):
         raise ValueError(repo_result.get('stderr') or 'Failed to inspect repository files for planning')
@@ -521,7 +521,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
         )
 
         if not approved_plan:
-            plan, plan_enrichment = _build_plan_for_run(db, env, run.goal)
+            plan, plan_enrichment = _build_plan_for_run(db, env, run.goal, settings)
             planning_step.output_json = {
                 **plan,
                 'enrichment': plan_enrichment,
