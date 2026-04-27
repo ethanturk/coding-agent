@@ -48,7 +48,7 @@ export default async function NewRunPage() {
         <h1 className="page-title">New Run</h1>
         <p className="page-subtitle">Launch a new orchestrated programming run against a configured project.</p>
         <form action={createRun} className="grid">
-          <select name="project_id" required>
+          <select id="run-project-id" name="project_id" required>
             <option value="">Select project</option>
             {projects.map((project: any) => (
               <option key={project.id} value={project.id}>{project.name}{project.local_repo_path ? '' : ' (needs repo path)'}</option>
@@ -57,7 +57,7 @@ export default async function NewRunPage() {
           <input name="title" placeholder="Run title" required />
           <textarea id="run-goal" name="goal" placeholder="What should the agent do?" rows={6} required />
           <div style={{ display: 'flex', gap: 12 }}>
-            <EnhancePromptButton textareaId="run-goal" />
+            <EnhancePromptButton textareaId="run-goal" projectSelectId="run-project-id" />
             <FormSubmitButton label="Create and execute run" pendingLabel="Creating run…" />
           </div>
         </form>
