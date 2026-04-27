@@ -6,6 +6,8 @@ def test_default_settings_include_model_retry_controls():
     retries = DEFAULT_SETTINGS['autonomy']['model_retries']
     assert retries['max_attempts'] == 3
     assert retries['base_delay_seconds'] == 1.5
+    assert retries['max_delay_seconds'] == 10.0
+    assert retries['jitter_ratio'] == 0.25
 
 
 def test_retry_wrapper_clamps_invalid_values(monkeypatch):

@@ -23,6 +23,8 @@ DEFAULT_SETTINGS = {
         'model_retries': {
             'max_attempts': 3,
             'base_delay_seconds': 1.5,
+            'max_delay_seconds': 10.0,
+            'jitter_ratio': 0.25,
         },
         'scope_control': {
             'require_plan_approval': True,

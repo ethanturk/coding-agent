@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import time
 from pathlib import Path
 
@@ -268,9 +269,11 @@ def _is_transient_model_error(exc: Exception) -> bool:
 
 
 
-def _invoke_deep_agent_with_retries(*, agent, goal: str, test_command: str | None, inspect_command: str | None, thread_id: str | None, max_attempts: int = 3, base_delay_seconds: float = 1.5) -> dict:
+def _invoke_deep_agent_with_retries(*, agent, goal: str, test_command: str | None, inspect_command: str | None, thread_id: str | None, max_attempts: int = 3, base_delay_seconds: float = 1.5, max_delay_seconds: float = 10.0, jitter_ratio: float = 0.25) -> dict:
     max_attempts = max(1, int(max_attempts))
     base_delay_seconds = max(0.0, float(base_delay_seconds))
+    max_delay_seconds = max(0.0, float(max_delay_seconds))
+    jitter_ratio = max(0.0, float(jitter_ratio))
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
@@ -285,8 +288,12 @@ def _invoke_deep_agent_with_retries(*, agent, goal: str, test_command: str | Non
             last_exc = exc
             if attempt >= max_attempts or not _is_transient_model_error(exc):
                 raise
-            delay = base_delay_seconds * (2 ** (attempt - 1))
-            logger.warning('Transient model invocation failure on attempt %s/%s, retrying in %.1fs: %s', attempt, max_attempts, delay, exc)
+            raw_delay = base_delay_seconds * (2 ** (attempt - 1))
+            capped_delay = min(raw_delay, max_delay_seconds)
+            jitter_span = capped_delay * jitter_ratio
+            delay = capped_delay + (random.uniform(-jitter_span, jitter_span) if jitter_span else 0.0)
+            delay = max(0.0, delay)
+            logger.warning('Transient model invocation failure on attempt %s/%s, retrying in %.2fs (raw=%.2fs, cap=%.2fs, jitter_ratio=%.2f): %s', attempt, max_attempts, delay, raw_delay, max_delay_seconds, jitter_ratio, exc)
             time.sleep(delay)
     if last_exc:
         raise last_exc
@@ -637,6 +644,8 @@ def execute_run(db: Session, run_id: str) -> Run | None:
             thread_id=thread_id if enable_hitl else None,
             max_attempts=retry_settings.get('max_attempts', 3),
             base_delay_seconds=retry_settings.get('base_delay_seconds', 1.5),
+            max_delay_seconds=retry_settings.get('max_delay_seconds', 10.0),
+            jitter_ratio=retry_settings.get('jitter_ratio', 0.25),
         )
     except Exception as exc:
         logger.exception("DeepAgents invocation failed for run %s", run_id)

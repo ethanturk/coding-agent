@@ -23,6 +23,8 @@ export function SettingsEditor({ initial }: { initial: any }) {
       model_retries: {
         max_attempts: 3,
         base_delay_seconds: 1.5,
+        max_delay_seconds: 10,
+        jitter_ratio: 0.25,
       },
       scope_control: {
         require_plan_approval: true,
@@ -208,6 +210,28 @@ export function SettingsEditor({ initial }: { initial: any }) {
               step="0.5"
               value={settings.autonomy?.model_retries?.base_delay_seconds ?? 1.5}
               onChange={(e) => patch(['autonomy', 'model_retries', 'base_delay_seconds'], Number(e.target.value || 1.5))}
+            />
+          </label>
+          <label>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Retry max delay (seconds)</div>
+            <input
+              type="number"
+              min="0"
+              max="120"
+              step="0.5"
+              value={settings.autonomy?.model_retries?.max_delay_seconds ?? 10}
+              onChange={(e) => patch(['autonomy', 'model_retries', 'max_delay_seconds'], Number(e.target.value || 10))}
+            />
+          </label>
+          <label>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Retry jitter ratio</div>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={settings.autonomy?.model_retries?.jitter_ratio ?? 0.25}
+              onChange={(e) => patch(['autonomy', 'model_retries', 'jitter_ratio'], Number(e.target.value || 0.25))}
             />
           </label>
         </div>
