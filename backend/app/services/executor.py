@@ -47,6 +47,120 @@ from app.services.docker_runner import (
 from app.services.runs import _id
 from app.services.settings import get_settings, resolve_role_model
 
+
+
+def _complete_filesystem_cleanup(db: Session, run: Run, planning_step: Step, env, approved_plan: dict) -> Run:
+    operations = approved_plan.get('operations') or []
+    deleted_matches: list[str] = []
+    deleted_patterns: list[str] = []
+
+    implementation_step = Step(
+        id=_id('step'),
+        run_id=run.id,
+        sequence_index=2,
+        kind=StepKind.IMPLEMENTATION,
+        role=AgentRole.DEVELOPER,
+        title='Filesystem cleanup implementation',
+        status=StepStatus.RUNNING,
+        input_json={
+            'approved_plan': approved_plan,
+            'goal': run.goal,
+        },
+    )
+    db.add(implementation_step)
+    db.flush()
+    db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='step.started', payload_json={'title': implementation_step.title}))
+
+    for op in operations:
+        if op.get('type') != 'delete_path':
+            continue
+        matches = [match.rstrip('/') for match in (op.get('matches') or []) if match]
+        if not matches:
+            continue
+        for rel_path in matches:
+            result = exec_in_container(env, f"cd {env.repo_dir} && rm -rf -- '{rel_path}'")
+            if not result.get('ok'):
+                implementation_step.status = StepStatus.FAILED
+                implementation_step.error_summary = result.get('stderr') or f'Failed to delete approved path {rel_path}'
+                run.status = RunStatus.FAILED
+                run.final_summary = implementation_step.error_summary
+                db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='run.failed', payload_json={'error': implementation_step.error_summary, 'phase': 'filesystem_cleanup'}))
+                db.commit()
+                db.refresh(run)
+                return run
+            deleted_matches.append(rel_path)
+        deleted_patterns.append(op.get('path'))
+        db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='filesystem.path_deleted', payload_json={'path': op.get('path'), 'matches': matches}))
+
+    status_result = exec_in_container(env, f"cd {env.repo_dir} && git status --short")
+    status_output = (status_result.get('stdout') or '').strip()
+    if not status_result.get('ok'):
+        implementation_step.status = StepStatus.FAILED
+        implementation_step.error_summary = status_result.get('stderr') or 'Failed to verify git status'
+        run.status = RunStatus.FAILED
+        run.final_summary = implementation_step.error_summary
+        db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='run.failed', payload_json={'error': implementation_step.error_summary, 'phase': 'git_status'}))
+        db.commit()
+        db.refresh(run)
+        return run
+
+    constraints = approved_plan.get('constraints') or {}
+    commit_cfg = approved_plan.get('commit') or {}
+    if constraints.get('stage_changes'):
+        stage_result = exec_in_container(env, f"cd {env.repo_dir} && git add -A")
+        if not stage_result.get('ok'):
+            implementation_step.status = StepStatus.FAILED
+            implementation_step.error_summary = stage_result.get('stderr') or 'Failed to stage cleanup changes'
+            run.status = RunStatus.FAILED
+            run.final_summary = implementation_step.error_summary
+            db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='run.failed', payload_json={'error': implementation_step.error_summary, 'phase': 'git_add'}))
+            db.commit()
+            db.refresh(run)
+            return run
+
+    commit_output = None
+    if commit_cfg.get('enabled') and deleted_matches:
+        message = (commit_cfg.get('message') or '').replace("'", "'\\''")
+        commit_result = exec_in_container(env, f"cd {env.repo_dir} && git commit -m '{message}'")
+        if not commit_result.get('ok'):
+            implementation_step.status = StepStatus.FAILED
+            implementation_step.error_summary = commit_result.get('stderr') or 'Failed to create cleanup commit'
+            run.status = RunStatus.FAILED
+            run.final_summary = implementation_step.error_summary
+            db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='run.failed', payload_json={'error': implementation_step.error_summary, 'phase': 'git_commit'}))
+            db.commit()
+            db.refresh(run)
+            return run
+        commit_output = (commit_result.get('stdout') or '').strip()
+
+    implementation_step.status = StepStatus.COMPLETED
+    implementation_step.output_json = {
+        'deleted_matches': deleted_matches,
+        'deleted_patterns': deleted_patterns,
+        'git_status': status_output,
+        'commit_output': commit_output,
+    }
+    planning_step.status = StepStatus.COMPLETED
+    review_step = Step(
+        id=_id('step'),
+        run_id=run.id,
+        sequence_index=3,
+        kind=StepKind.REVIEW,
+        role=AgentRole.REVIEWER,
+        title='Filesystem cleanup review',
+        status=StepStatus.COMPLETED,
+        input_json={'deleted_matches': deleted_matches},
+        output_json={'decision': 'approved', 'summary': 'Filesystem cleanup executed deterministically from approved plan.'},
+    )
+    db.add(review_step)
+    run.status = RunStatus.COMPLETED
+    run.current_step_id = review_step.id
+    run.final_summary = f"Cleanup completed: removed {len(deleted_matches)} matched path(s)"
+    db.add(Event(id=_id('evt'), run_id=run.id, step_id=review_step.id, event_type='run.completed', payload_json={'reason': 'filesystem_cleanup_completed', 'deleted_matches': deleted_matches, 'git_status': status_output, 'commit_output': commit_output}))
+    db.commit()
+    db.refresh(run)
+    return run
+
 logger = logging.getLogger(__name__)
 
 ARTIFACT_BASE = Path("/home/ethanturk/.openclaw/workspace/coding-agent/runtime_artifacts")
@@ -417,6 +531,9 @@ def execute_run(db: Session, run_id: str) -> Run | None:
                 )
             )
             db.commit()
+
+    if approved_plan and approved_plan.get('mode') == 'filesystem_cleanup':
+        return _complete_filesystem_cleanup(db, run, planning_step, env, approved_plan)
 
     # --- Step 4: Invoke orchestrator ---
     implementation_step = Step(
