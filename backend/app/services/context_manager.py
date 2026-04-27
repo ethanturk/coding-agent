@@ -10,6 +10,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from app.services.settings import get_settings, resolve_role_model
+from app.services.tokenizer import count_tokens
 
 
 # Known context window sizes per model family (tokens).
@@ -119,3 +120,11 @@ def compute_token_budget(model_name: str, reserved_for_response: int = 4096) -> 
         "available": available,
         "compression_trigger": trigger,
     }
+
+
+def count_message_tokens(model_name: str, messages: list[dict]) -> int:
+    total = 0
+    for message in messages:
+        total += count_tokens(str(message.get('content') or ''), model_name)
+        total += 4
+    return total

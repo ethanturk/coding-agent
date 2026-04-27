@@ -7,6 +7,7 @@ from app.models import Project
 from app.services.developer_agent import infer_targets_from_repo
 from app.services.llm_client import llm_chat_text, resolve_role_llm_config
 from app.services.settings import get_settings
+from app.services.tokenizer import count_tokens, truncate_to_token_limit
 
 
 def _resolve_provider_config(settings: dict) -> tuple[str, str, dict]:
@@ -89,11 +90,13 @@ def rewrite_prompt(db, text: str, project: Project | None = None) -> dict:
         ],
         temperature=0.2,
     )
-    content = result['content'].strip()[:max_len]
+    raw_content = result['content'].strip()
+    content = truncate_to_token_limit(raw_content, max_len, result['model'])
     return {
         'provider': result['provider'],
         'model': result['model'],
         'content': content,
         'max_prompt_length': max_len,
+        'token_count': count_tokens(content, result['model']),
         'project_context_used': bool(project_context),
     }
