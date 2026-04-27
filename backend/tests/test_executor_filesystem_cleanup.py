@@ -40,6 +40,18 @@ class FakeDb:
         return FakeQuery(None)
 
 
+def test_run_has_completed_implementation_treats_failed_attempt_as_resume_trigger(monkeypatch):
+    failed_step = SimpleNamespace()
+
+    class ResumeDb:
+        def query(self, model):
+            return FakeQuery(failed_step)
+
+    assert executor_api._run_has_completed_implementation(ResumeDb(), 'run_1') is True
+
+
+
+
 def test_complete_filesystem_cleanup_runs_without_deepagents(monkeypatch):
     run = SimpleNamespace(id='run_1', goal='cleanup', status=RunStatus.RUNNING, current_step_id='step_plan', final_summary=None)
     planning_step = SimpleNamespace(id='step_plan', status=StepStatus.RUNNING)

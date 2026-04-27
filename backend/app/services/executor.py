@@ -126,7 +126,7 @@ def _complete_filesystem_cleanup(db: Session, run: Run, planning_step: Step, env
         commit_result = exec_in_container(env, f"cd {env.repo_dir} && git commit -m '{message}'")
         if not commit_result.get('ok'):
             implementation_step.status = StepStatus.FAILED
-            implementation_step.error_summary = commit_result.get('stderr') or 'Failed to create cleanup commit'
+            implementation_step.error_summary = (commit_result.get('stderr') or commit_result.get('stdout') or 'Failed to create cleanup commit')[:500]
             run.status = RunStatus.FAILED
             run.final_summary = implementation_step.error_summary
             db.add(Event(id=_id('evt'), run_id=run.id, step_id=implementation_step.id, event_type='run.failed', payload_json={'error': implementation_step.error_summary, 'phase': 'git_commit'}))
@@ -302,7 +302,7 @@ def _run_has_completed_implementation(db: Session, run_id: str) -> bool:
         .filter(
             Step.run_id == run_id,
             Step.kind == StepKind.IMPLEMENTATION,
-            Step.status == StepStatus.COMPLETED,
+            Step.status.in_([StepStatus.COMPLETED, StepStatus.FAILED]),
         )
         .first()
         is not None
