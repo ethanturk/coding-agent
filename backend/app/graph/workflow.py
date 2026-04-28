@@ -21,6 +21,7 @@ from typing import Any
 from deepagents import SubAgent, create_deep_agent
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 
 from app.services.langgraph_checkpoint import SqliteCheckpointSaver
 
@@ -233,13 +234,10 @@ def resume_deep_agent(
     config = {"configurable": {"thread_id": thread_id}}
 
     if approve:
-        # Resume with no state changes — let the pending tool calls proceed
-        result = agent.invoke(None, config=config)
+        result = agent.invoke(Command(resume=True), config=config)
     else:
-        # Cancel: inject a rejection message
-        from langchain_core.messages import HumanMessage
         result = agent.invoke(
-            {"messages": [HumanMessage(content="The proposed edits were rejected by the reviewer. Please stop and report the current state.")]},
+            Command(resume="The proposed edits were rejected by the reviewer. Please stop and report the current state."),
             config=config,
         )
 
