@@ -373,8 +373,8 @@ export function SettingsEditor({ initial }: { initial: any }) {
           />
           <ToggleCard
             label="Interrupt before write operations"
-            hint="Pauses before writing files when extra review is desired."
-            checked={settings.autonomy?.scope_control?.interrupt_before_write ?? true}
+            hint="Pauses before low-level file writes when extra review is desired. Usually leave this off and rely on plan/review approvals instead."
+            checked={settings.autonomy?.scope_control?.interrupt_before_write ?? false}
             onChange={(checked) => patch(['autonomy', 'scope_control', 'interrupt_before_write'], checked)}
           />
           <ToggleCard

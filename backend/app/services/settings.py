@@ -35,7 +35,7 @@ DEFAULT_SETTINGS = {
         },
         'scope_control': {
             'require_plan_approval': True,
-            'interrupt_before_write': True,
+            'interrupt_before_write': False,
             'max_files_changed': 3,
             'max_parallel_developer_tasks': 1,
             'allow_path_expansion': False,

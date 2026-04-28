@@ -7,7 +7,7 @@ from app.models.enums import ApprovalType
 
 DEFAULT_SCOPE_CONTROL = {
     'require_plan_approval': True,
-    'interrupt_before_write': True,
+    'interrupt_before_write': False,
     'max_files_changed': 3,
     'max_parallel_developer_tasks': 1,
     'allow_path_expansion': False,
@@ -22,7 +22,7 @@ def get_scope_control(settings: dict | None) -> dict:
     merged['max_files_changed'] = max(1, int(merged.get('max_files_changed', DEFAULT_SCOPE_CONTROL['max_files_changed']) or 1))
     merged['max_parallel_developer_tasks'] = max(1, int(merged.get('max_parallel_developer_tasks', DEFAULT_SCOPE_CONTROL['max_parallel_developer_tasks']) or 1))
     merged['require_plan_approval'] = bool(merged.get('require_plan_approval', True))
-    merged['interrupt_before_write'] = bool(merged.get('interrupt_before_write', True))
+    merged['interrupt_before_write'] = bool(merged.get('interrupt_before_write', False))
     merged['allow_path_expansion'] = bool(merged.get('allow_path_expansion', False))
     return merged
 
