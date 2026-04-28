@@ -233,28 +233,29 @@ def resume_deep_agent(
     """
     config = {"configurable": {"thread_id": thread_id}}
 
-    pending = _extract_pending_tool_calls(agent, thread_id)
-    if approve:
-        resume_value = {
-            item['interrupt_id']: {
-                'decisions': [
-                    {'type': 'approve'} for _ in ((item.get('args') or {}).get('action_requests') or [])
-                ]
+    interrupts = _get_interrupts(agent, thread_id)
+    if interrupts:
+        if approve:
+            resume_value = {
+                interrupt_id: {
+                    'decisions': [{'type': 'approve'} for _ in action_requests]
+                }
+                for interrupt_id, action_requests in interrupts
             }
-            for item in pending if item.get('interrupt_id')
-        }
-        result = agent.invoke(Command(resume=resume_value or {'decisions': [{'type': 'approve'}]}), config=config)
+        else:
+            rejection = "The proposed edits were rejected by the reviewer. Please stop and report the current state."
+            resume_value = {
+                interrupt_id: {
+                    'decisions': [
+                        {'type': 'reject', 'message': rejection} for _ in action_requests
+                    ]
+                }
+                for interrupt_id, action_requests in interrupts
+            }
+        result = agent.invoke(Command(resume=resume_value), config=config)
     else:
-        rejection = "The proposed edits were rejected by the reviewer. Please stop and report the current state."
-        resume_value = {
-            item['interrupt_id']: {
-                'decisions': [
-                    {'type': 'reject', 'message': rejection} for _ in ((item.get('args') or {}).get('action_requests') or [])
-                ]
-            }
-            for item in pending if item.get('interrupt_id')
-        }
-        result = agent.invoke(Command(resume=resume_value or {'decisions': [{'type': 'reject', 'message': rejection}]}), config=config)
+        legacy_resume = True if approve else "The proposed edits were rejected by the reviewer. Please stop and report the current state."
+        result = agent.invoke(Command(resume=legacy_resume), config=config)
 
     if _is_interrupted(agent, thread_id):
         pending = _extract_pending_tool_calls(agent, thread_id)
@@ -280,6 +281,25 @@ def _is_interrupted(agent: CompiledStateGraph, thread_id: str | None) -> bool:
         return bool(state and state.next)
     except Exception:
         return False
+
+
+def _get_interrupts(agent: CompiledStateGraph, thread_id: str) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Return raw interrupts as (interrupt_id, action_requests) tuples."""
+    try:
+        state = agent.get_state({"configurable": {"thread_id": thread_id}})
+        if not state:
+            return []
+        interrupts = getattr(state, 'interrupts', None) or ()
+        result = []
+        for interrupt in interrupts:
+            interrupt_id = getattr(interrupt, 'id', None)
+            value = getattr(interrupt, 'value', None) or {}
+            if interrupt_id and isinstance(value, dict):
+                action_requests = value.get('action_requests') or []
+                result.append((interrupt_id, action_requests))
+        return result
+    except Exception:
+        return []
 
 
 def _extract_pending_tool_calls(agent: CompiledStateGraph, thread_id: str) -> list[dict]:
