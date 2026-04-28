@@ -233,13 +233,14 @@ def resume_deep_agent(
     """
     config = {"configurable": {"thread_id": thread_id}}
 
+    pending = _extract_pending_tool_calls(agent, thread_id)
     if approve:
-        result = agent.invoke(Command(resume=True), config=config)
+        resume_value = {item['interrupt_id']: True for item in pending if item.get('interrupt_id')}
+        result = agent.invoke(Command(resume=resume_value or True), config=config)
     else:
-        result = agent.invoke(
-            Command(resume="The proposed edits were rejected by the reviewer. Please stop and report the current state."),
-            config=config,
-        )
+        rejection = "The proposed edits were rejected by the reviewer. Please stop and report the current state."
+        resume_value = {item['interrupt_id']: rejection for item in pending if item.get('interrupt_id')}
+        result = agent.invoke(Command(resume=resume_value or rejection), config=config)
 
     if _is_interrupted(agent, thread_id):
         pending = _extract_pending_tool_calls(agent, thread_id)
@@ -268,23 +269,37 @@ def _is_interrupted(agent: CompiledStateGraph, thread_id: str | None) -> bool:
 
 
 def _extract_pending_tool_calls(agent: CompiledStateGraph, thread_id: str) -> list[dict]:
-    """Extract pending tool calls from an interrupted graph state."""
+    """Extract pending interrupts/tool calls from an interrupted graph state."""
     try:
         state = agent.get_state({"configurable": {"thread_id": thread_id}})
-        if not state or not state.values:
+        if not state:
+            return []
+        interrupts = getattr(state, 'interrupts', None) or ()
+        pending = []
+        for interrupt in interrupts:
+            value = getattr(interrupt, 'value', None) or {}
+            pending.append({
+                'interrupt_id': getattr(interrupt, 'id', None),
+                'tool': value.get('action_requests', [{}])[0].get('action_name') if isinstance(value, dict) else 'unknown',
+                'args': value,
+            })
+        if pending:
+            return pending
+        if not state.values:
             return []
         messages = state.values.get("messages", [])
-        pending = []
         for msg in reversed(messages):
             tool_calls = getattr(msg, "tool_calls", None)
             if tool_calls:
-                for tc in tool_calls:
-                    pending.append({
+                return [
+                    {
+                        "interrupt_id": None,
                         "tool": tc.get("name", "unknown"),
                         "args": tc.get("args", {}),
-                    })
-                break
-        return pending
+                    }
+                    for tc in tool_calls
+                ]
+        return []
     except Exception:
         return []
 
