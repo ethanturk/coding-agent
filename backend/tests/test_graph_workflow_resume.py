@@ -30,24 +30,30 @@ class FakeAgent:
 
 def test_resume_deep_agent_uses_interrupt_id_map_for_approval():
     agent = FakeAgent([
-        FakeInterrupt('int-1', {'action_requests': [{'action_name': 'edit_file'}]}),
-        FakeInterrupt('int-2', {'action_requests': [{'action_name': 'edit_file'}]}),
+        FakeInterrupt('int-1', {'action_requests': [{'name': 'edit_file'}, {'name': 'write_file'}]}),
+        FakeInterrupt('int-2', {'action_requests': [{'name': 'edit_file'}]}),
     ])
     workflow_api.resume_deep_agent(agent, 'thread-123', approve=True)
     payload, config = agent.calls[0]
     assert isinstance(payload, Command)
-    assert payload.resume == {'int-1': True, 'int-2': True}
+    assert payload.resume == {
+        'int-1': {'decisions': [{'type': 'approve'}, {'type': 'approve'}]},
+        'int-2': {'decisions': [{'type': 'approve'}]},
+    }
     assert config == {'configurable': {'thread_id': 'thread-123'}}
 
 
 def test_resume_deep_agent_uses_interrupt_id_map_for_rejection():
     agent = FakeAgent([
-        FakeInterrupt('int-1', {'action_requests': [{'action_name': 'edit_file'}]}),
-        FakeInterrupt('int-2', {'action_requests': [{'action_name': 'edit_file'}]}),
+        FakeInterrupt('int-1', {'action_requests': [{'name': 'edit_file'}, {'name': 'write_file'}]}),
+        FakeInterrupt('int-2', {'action_requests': [{'name': 'edit_file'}]}),
     ])
     workflow_api.resume_deep_agent(agent, 'thread-123', approve=False)
     payload, config = agent.calls[0]
     assert isinstance(payload, Command)
     assert payload.resume.keys() == {'int-1', 'int-2'}
-    assert all('rejected' in value.lower() for value in payload.resume.values())
+    assert payload.resume['int-1']['decisions'][0]['type'] == 'reject'
+    assert payload.resume['int-1']['decisions'][1]['type'] == 'reject'
+    assert payload.resume['int-2']['decisions'][0]['type'] == 'reject'
+    assert all('rejected' in decision['message'].lower() for value in payload.resume.values() for decision in value['decisions'])
     assert config == {'configurable': {'thread_id': 'thread-123'}}
