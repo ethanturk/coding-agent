@@ -155,7 +155,7 @@ def test_approve_cleanup_expands_wildcard_matches(monkeypatch):
     ]
 
 
-def test_approve_hitl_marks_run_queued_and_starts_resume(monkeypatch):
+def test_approve_hitl_returns_non_resumable_message():
     approval = SimpleNamespace(
         id='apr_hitl',
         run_id='run_hitl',
@@ -168,25 +168,13 @@ def test_approve_hitl_marks_run_queued_and_starts_resume(monkeypatch):
     run = SimpleNamespace(id='run_hitl', current_step_id='step_hitl', status=RunStatus.WAITING_FOR_HUMAN, final_summary='waiting')
     db = FakeDb(approval, run)
 
-    started = []
-
-    class FakeThread:
-        def __init__(self, target=None, args=(), daemon=None):
-            started.append({'target': target, 'args': args, 'daemon': daemon})
-
-        def start(self):
-            started[-1]['started'] = True
-
-    monkeypatch.setattr(approvals_api.threading, 'Thread', FakeThread)
-
     result = approvals_api.approve('apr_hitl', db)
 
     assert approval.status == ApprovalStatus.APPROVED
-    assert run.status == RunStatus.QUEUED
-    assert run.final_summary == 'Approval accepted, run resumed'
+    assert run.status == RunStatus.WAITING_FOR_HUMAN
     assert db.committed is True
-    assert result['resumed'] is True
-    assert started and started[0]['args'] == ('run_hitl',)
+    assert result['resumed'] is False
+    assert 'cannot be resumed safely' in result['message']
 
 
 
