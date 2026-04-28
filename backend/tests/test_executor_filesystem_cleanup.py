@@ -1,6 +1,7 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from app.models.enums import RunStatus, StepKind, StepStatus
+from app.models.enums import ApprovalStatus, RunStatus, StepKind, StepStatus
 from app.services import executor as executor_api
 
 
@@ -49,6 +50,29 @@ def test_run_has_completed_implementation_treats_failed_attempt_as_resume_trigge
 
     assert executor_api._run_has_completed_implementation(ResumeDb(), 'run_1') is True
 
+
+
+
+def test_get_pending_hitl_thread_id_reads_approved_hitl_approval():
+    approval = SimpleNamespace(
+        requested_payload_json={'hitl': True, 'thread_id': 'thread-123'},
+    )
+
+    class HitlQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return approval
+
+    class HitlDb:
+        def query(self, model):
+            return HitlQuery()
+
+    assert executor_api._get_pending_hitl_thread_id(HitlDb(), 'run_1') == 'thread-123'
 
 
 

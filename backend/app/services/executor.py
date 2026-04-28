@@ -375,6 +375,28 @@ def _approved_plan_requires_continuation(approved_plan: dict | None) -> bool:
     return bool(approved_plan.get('operations'))
 
 
+def _get_pending_hitl_thread_id(db: Session, run_id: str) -> str | None:
+    pending_hitl = (
+        db.query(Approval)
+        .filter(
+            Approval.run_id == run_id,
+            Approval.approval_type == ApprovalType.EDIT_PROPOSAL,
+            Approval.status.in_([ApprovalStatus.APPROVED, ApprovalStatus.OVERRIDDEN]),
+        )
+        .order_by(Approval.created_at.desc())
+        .first()
+    )
+    if not pending_hitl:
+        return None
+    payload = pending_hitl.requested_payload_json or {}
+    if not payload.get('hitl'):
+        return None
+    thread_id = payload.get('thread_id')
+    if thread_id:
+        return str(thread_id)
+    return None
+
+
 def execute_run(db: Session, run_id: str) -> Run | None:
     """Execute a run using the DeepAgents orchestrator.
 
@@ -400,6 +422,7 @@ def execute_run(db: Session, run_id: str) -> Run | None:
     }
     scope_control = get_scope_control(settings)
     approved_plan = None
+    resume_thread_id = _get_pending_hitl_thread_id(db, run.id)
 
     run.status = RunStatus.RUNNING
     db.add(
@@ -637,17 +660,21 @@ def execute_run(db: Session, run_id: str) -> Run | None:
 
     try:
         retry_settings = ((settings.get('autonomy') or {}).get('model_retries') or {})
-        agent_result = _invoke_deep_agent_with_retries(
-            agent=agent,
-            goal=implementation_goal,
-            test_command=project.test_command,
-            inspect_command=project.inspect_command,
-            thread_id=thread_id if enable_hitl else None,
-            max_attempts=retry_settings.get('max_attempts', 3),
-            base_delay_seconds=retry_settings.get('base_delay_seconds', 1.5),
-            max_delay_seconds=retry_settings.get('max_delay_seconds', 10.0),
-            jitter_ratio=retry_settings.get('jitter_ratio', 0.25),
-        )
+        if enable_hitl and resume_thread_id:
+            agent_result = resume_deep_agent(agent, resume_thread_id, approve=True)
+            thread_id = resume_thread_id
+        else:
+            agent_result = _invoke_deep_agent_with_retries(
+                agent=agent,
+                goal=implementation_goal,
+                test_command=project.test_command,
+                inspect_command=project.inspect_command,
+                thread_id=thread_id if enable_hitl else None,
+                max_attempts=retry_settings.get('max_attempts', 3),
+                base_delay_seconds=retry_settings.get('base_delay_seconds', 1.5),
+                max_delay_seconds=retry_settings.get('max_delay_seconds', 10.0),
+                jitter_ratio=retry_settings.get('jitter_ratio', 0.25),
+            )
     except Exception as exc:
         logger.exception("DeepAgents invocation failed for run %s", run_id)
         implementation_step.status = StepStatus.FAILED

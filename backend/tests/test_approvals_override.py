@@ -8,14 +8,21 @@ from app.models.enums import ApprovalStatus, RunStatus
 
 
 class FakeQuery:
-    def __init__(self, approvals):
+    def __init__(self, approvals, first_result=None):
         self._approvals = approvals
+        self._first_result = first_result
 
     def filter(self, *args, **kwargs):
         return self
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def all(self):
         return list(self._approvals)
+
+    def first(self):
+        return self._first_result
 
 
 class FakeDb:
@@ -35,6 +42,9 @@ class FakeDb:
         return None
 
     def query(self, model):
+        name = getattr(model, '__name__', '')
+        if name == 'ExecutionEnvironment':
+            return FakeQuery([], None)
         return FakeQuery(self._approvals)
 
     def add(self, obj):
@@ -143,6 +153,41 @@ def test_approve_cleanup_expands_wildcard_matches(monkeypatch):
         "cd /workspace/repo && rm -rf -- 'apps/web/.idea'",
         "cd /workspace/repo && rm -rf -- 'packages/api/.idea'",
     ]
+
+
+def test_approve_hitl_marks_run_queued_and_starts_resume(monkeypatch):
+    approval = SimpleNamespace(
+        id='apr_hitl',
+        run_id='run_hitl',
+        requested_payload_json={'hitl': True, 'thread_id': 'thread-123', 'pending_tool_calls': [{'tool': 'edit_file'}]},
+        response_payload_json=None,
+        approval_type='edit_proposal',
+        status=ApprovalStatus.PENDING,
+        created_at=datetime.now(timezone.utc),
+    )
+    run = SimpleNamespace(id='run_hitl', current_step_id='step_hitl', status=RunStatus.WAITING_FOR_HUMAN, final_summary='waiting')
+    db = FakeDb(approval, run)
+
+    started = []
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            started.append({'target': target, 'args': args, 'daemon': daemon})
+
+        def start(self):
+            started[-1]['started'] = True
+
+    monkeypatch.setattr(approvals_api.threading, 'Thread', FakeThread)
+
+    result = approvals_api.approve('apr_hitl', db)
+
+    assert approval.status == ApprovalStatus.APPROVED
+    assert run.status == RunStatus.QUEUED
+    assert run.final_summary == 'Approval accepted, run resumed'
+    assert db.committed is True
+    assert result['resumed'] is True
+    assert started and started[0]['args'] == ('run_hitl',)
+
 
 
 def test_list_approvals_backfills_override_for_pending_plan_and_review():
