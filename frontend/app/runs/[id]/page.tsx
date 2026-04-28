@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation';
 
 import { Approvals } from '../../../components/approvals';
 import { FilesystemOperationsCard } from '../../../components/filesystem-operations-card';
-import { LiveEvents } from '../../../components/live-events';
 import { PlannedFileActionsTable } from '../../../components/planned-file-actions-table';
 import { PrLifecycleCard } from '../../../components/pr-lifecycle-card';
 import { RunStageBadge } from '../../../components/run-stage-badge';
@@ -312,9 +311,6 @@ export default async function RunDetail({
         </div>
       </section>
 
-      <section className="card">
-        <LiveEvents runId={id} />
-      </section>
     </main>
   );
 }
