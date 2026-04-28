@@ -134,10 +134,6 @@ def approve(approval_id: str, db: Session = Depends(get_db)):
         _resume_run(run, db, summary='Approved edit proposal resumed', event_type='run.resumed', payload={'reason': 'approved_edit_proposal', 'paths': applied_paths})
         return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": True, "edit_applied": True, "paths": applied_paths}
 
-    if payload.get('hitl'):
-        db.commit()
-        return {"ok": True, "status": approval.status, "run_id": approval.run_id, "resumed": False, "message": "This approval came from a non-durable live edit interrupt and cannot be resumed safely. Retry the run after disabling live write interrupts for this flow."}
-
     if run:
         _resume_run(run, db, summary='Approval accepted, run resumed', event_type='run.resumed', payload={'reason': 'approval_accepted'})
     else:

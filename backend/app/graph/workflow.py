@@ -15,12 +15,14 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 
 from deepagents import SubAgent, create_deep_agent
 from langchain_core.language_models import BaseChatModel
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.state import CompiledStateGraph
+
+from app.services.langgraph_checkpoint import SqliteCheckpointSaver
 
 from app.graph.agents.developer import DEVELOPER_SUBAGENT
 from app.graph.agents.planner import PLANNER_SUBAGENT
@@ -28,6 +30,8 @@ from app.graph.agents.reviewer import REVIEWER_SUBAGENT
 from app.services.deepagents_fs import DockerSandbox
 
 logger = logging.getLogger(__name__)
+
+CHECKPOINT_DB_PATH = Path('/home/ethanturk/.openclaw/workspace/coding-agent/runtime_artifacts/langgraph_checkpoints.sqlite3')
 
 ORCHESTRATOR_SYSTEM_PROMPT = """You are an orchestrator for a multi-model code writing and review system.
 You receive a coding goal and a project workspace, then coordinate planning,
@@ -109,7 +113,7 @@ def build_deep_agent(
     backend: DockerSandbox | None = None,
     project_context: str = "",
     enable_hitl: bool = False,
-) -> tuple[CompiledStateGraph, MemorySaver | None, str]:
+) -> tuple[CompiledStateGraph, SqliteCheckpointSaver | None, str]:
     """Build a DeepAgents orchestrator with role-specific models.
 
     Args:
@@ -137,8 +141,7 @@ def build_deep_agent(
     thread_id = str(uuid.uuid4())
 
     if enable_hitl:
-        checkpointer = MemorySaver()
-        # Interrupt before file modifications in subagents
+        checkpointer = SqliteCheckpointSaver(str(CHECKPOINT_DB_PATH))
         interrupt_on = {
             "edit_file": True,
             "write_file": True,
